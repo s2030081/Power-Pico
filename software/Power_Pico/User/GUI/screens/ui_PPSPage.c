@@ -215,7 +215,7 @@ void ui_pps_page_key_handler(void* key_event)
                 break;
             case 8:
                 cur_voltage -= 0.1;
-                if (cur_voltage < 5.0) cur_voltage = 5.0;
+                if (cur_voltage < 3.3) cur_voltage = 3.3;
                 ui_send_pps_set_msg(cur_voltage, cur_current);
                 break;
             case 9:
