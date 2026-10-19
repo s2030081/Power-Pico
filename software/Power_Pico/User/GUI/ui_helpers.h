@@ -57,6 +57,7 @@ void ui_send_pdsink_stop_msg(void);
 void ui_send_pps_set_msg(float voltage, float current);
 void ui_send_pd_fixed_set_msg(uint8_t level);
 int8_t MsgQueueGet_PPS_ready(void);
+int8_t MsgQueueGet_PD_ready(void);
 
 ///////////////////////////////////////////////////////////////
 
