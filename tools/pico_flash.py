@@ -67,6 +67,10 @@ class VerifyError(FlashError):
     """The bootloader's size or CRC32 did not match the file."""
 
 
+class ReportUnreadable(FlashError):
+    """The bootloader's report after a transfer could not be parsed."""
+
+
 # --- checksums -------------------------------------------------------------
 
 def _crc16_table():
@@ -311,6 +315,7 @@ class Flasher:
         self.t = timeouts or Timeouts()
         self.app_erased = False
         self.in_transfer = False
+        self.transfer_done = False
 
     def wait_for_bootloader(self):
         """Read only, until the banner shows this is the bootloader."""
@@ -409,11 +414,12 @@ class Flasher:
                                  "record, so the unit stays in the bootloader ('No App!') until "
                                  "an image is flashed." % ((": " + reason) if reason else ""))
             if b"Please reboot the device." in text:
-                size = re.search(rb"Size: (\d+) Bytes", text)
-                crc = re.search(rb"CRC32: 0x([0-9A-Fa-f]{8})", text)
+                # Int2Str leaves the size padded: " Size: 402948     Bytes".
+                size = re.search(rb"Size:\s*(\d+)\s*Bytes", text)
+                crc = re.search(rb"CRC32:\s*0x([0-9A-Fa-f]{8})", text)
                 if not size or not crc:
-                    raise FlashError("could not read the size and CRC32 in the bootloader's "
-                                     "report: %r" % text)
+                    raise ReportUnreadable("could not read the size and CRC32 in the "
+                                           "bootloader's report: %r" % text)
                 del self.link.buffer[:text.find(b"Please reboot the device.")]
                 return int(size.group(1)), int(crc.group(1), 16)
             if time.monotonic() >= deadline:
@@ -447,7 +453,15 @@ class Flasher:
         self.wait_crc_request(self.t.crc_request)
         self.say("Sending %s, %d bytes in %d blocks ..." % (name, len(data), info.blocks))
         self.send_image(data, name, progress)
-        size, crc = self.read_report()
+        self.transfer_done = True
+        try:
+            size, crc = self.read_report()
+        except ReportUnreadable as error:
+            raise FlashError("%s. The transfer finished and the bootloader recorded the image. "
+                             "Compare its size and CRC32 by hand with the file's: %d bytes, CRC32 "
+                             "0x%08X. If they match, the image is good and starts when the unit "
+                             "is plugged in without the button; if not, flash it again."
+                             % (error, len(data), info.crc32))
         if size != len(data) or crc != info.crc32:
             self.say("MISMATCH: the bootloader reports %d bytes, CRC32 0x%08X; the file is "
                      "%d bytes, CRC32 0x%08X. Erasing the application so it cannot start ..."
@@ -642,7 +656,8 @@ def main(argv=None):
         print("FAILED: %s" % error)
         status = 2
     except FlashError as error:
-        print("FAILED: %s%s" % (error, (" " + state_after_failure()) if flasher.app_erased
+        erased_without_image = flasher.app_erased and not flasher.transfer_done
+        print("FAILED: %s%s" % (error, (" " + state_after_failure()) if erased_without_image
                                 else ""))
     finally:
         if args.log:

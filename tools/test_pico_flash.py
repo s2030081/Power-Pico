@@ -176,7 +176,7 @@ class FakeBootloader:
             self.out += (b"\n\n\r File reception complete. Verifying...\n\r"
                          b"Verification and Flag Set successful!\r\n"
                          b"--------------------------------\r\n Name: " + self.name +
-                         b"\n\r Size: " + str(size).encode() + b" Bytes\r\n"
+                         b"\n\r Size: " + str(size).ljust(10).encode() + b" Bytes\r\n"
                          b" CRC32: 0x" + ("%08X" % crc).encode() +
                          b"\r\n-------------------\nPlease reboot the device.\r\n")
         else:
@@ -389,6 +389,20 @@ class Flashing(unittest.TestCase):
 
         frames = pf.check_running(open_port, lambda: None, "COM9", fast_timeouts(), settle=0)
         self.assertGreaterEqual(frames, 3)
+
+    def test_the_real_report_parses(self):
+        # The bootloader's report from the first flash on the unit, 2026-10-20.
+        report = (b"\n\n\r File reception complete. Verifying...\n\rVerification and Flag Set "
+                  b"successful!\r\n--------------------------------\r\n Name: power_pico.bin\n\r"
+                  b" Size: 402948     Bytes\r\n CRC32: 0xB3B20948\r\n-------------------\n"
+                  b"Please reboot the device.\r\n" + MENU)
+
+        class Replay(FakeBootloader):
+            def idle(self):
+                pass
+        port = Replay()
+        port.out += report
+        self.assertEqual(flasher_for(port).read_report(), (402948, 0xB3B20948))
 
     def test_bootloader_back_after_run_is_reported(self):
         with self.assertRaises(pf.FlashError):
