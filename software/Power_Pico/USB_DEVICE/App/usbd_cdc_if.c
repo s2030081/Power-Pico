@@ -158,6 +158,12 @@ static int8_t CDC_Init_FS(void)
   /* Set Application Buffers */
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
+  /* A USB reset or reconfiguration drops a transfer in flight without calling
+   * CDC_TransmitCplt_FS. Release MessageSendTask's in-flight flag here, or it
+   * waits for that completion forever and the stream stops until power-off. */
+  if (MessageSendTaskHandle != NULL) {
+    osThreadFlagsSet(MessageSendTaskHandle, FLAG_USB_TX_COMPLETE);
+  }
   return (USBD_OK);
   /* USER CODE END 3 */
 }
