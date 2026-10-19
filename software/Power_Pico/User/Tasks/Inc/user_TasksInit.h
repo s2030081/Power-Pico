@@ -48,6 +48,8 @@ extern osMessageQueueId_t CmdRxQueue;
 extern osMessageQueueId_t CmdTxQueue;
 extern volatile uint32_t CmdRxOverflowCount;
 
+extern void TaskTickHook(void);
+extern void MX_USB_DEVICE_Init(void);
 void User_Tasks_Init(void);
 
 #ifdef __cplusplus
