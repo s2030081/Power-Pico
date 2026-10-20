@@ -89,14 +89,9 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
   g_overflow_task_handle = xTask;
   g_overflow_task_name = pcTaskName;
 
-  taskDISABLE_INTERRUPTS();
-
-  /* Set a breakpoint here to inspect pcTaskName and call stack. */
-  __BKPT(0);
-
-  for(;;)
-  {
-  }
+  /* Open the CC switch and reset (main.c); with a debugger attached it stops
+     at a breakpoint first, to inspect pcTaskName and the call stack. */
+  pico_trap_reset();
 }
 /* USER CODE END 3 */
 

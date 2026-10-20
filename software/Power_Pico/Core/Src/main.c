@@ -175,6 +175,25 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+/**
+  * @brief  Every trap ends here instead of in a halt: a halted unit stops
+  *         its PPS keep-alive, and the charger then holds 5 V on the output
+  *         with nothing to ask it for anything else. Opening the CC switch
+  *         (as PD_CMD_STOP does) makes a Type-C charger drop VBUS; the reset
+  *         then starts the unit outside PD mode. With a debugger attached it
+  *         stops at a breakpoint first.
+  */
+void pico_trap_reset(void)
+{
+  __disable_irq();
+  GPIOB->BSRR = (uint32_t)GPIO_PIN_10 << 16U; /* FUSB CC pin disconnect */
+  if ((CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) != 0U)
+  {
+    __BKPT(0);
+  }
+  __DSB();
+  NVIC_SystemReset();
+}
 
 /* USER CODE END 4 */
 
@@ -208,10 +227,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  pico_trap_reset();
   /* USER CODE END Error_Handler_Debug */
 }
 
