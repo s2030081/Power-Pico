@@ -29,8 +29,9 @@ Usage:
   py tools/pico_flash.py flash IMAGE [--port PORT] [--sha256 HEX] [--run]
                                      [--yes] [--log FILE]
 
-'check' needs only Python. 'ports' and 'flash' need pyserial
-(py -m pip install pyserial).
+'check' needs only Python. 'ports' and 'flash' use pyserial when it is
+installed (py -m pip install pyserial); on Windows without it they open the
+port through the Win32 API instead (pico_serial.py, next to this file).
 """
 
 import argparse
@@ -40,6 +41,9 @@ import re
 import struct
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python -I leaves it out
+import pico_serial  # noqa: E402
 
 APP_ADDRESS = 0x08010000
 APP_SIZE = 0x08080000 - APP_ADDRESS  # flash sectors 4-7, 448 KB
@@ -537,8 +541,7 @@ def load_and_check(path, sha256):
 
 
 def serial_ports():
-    from serial.tools import list_ports  # pyserial
-    return [p for p in list_ports.comports() if p.vid == USB_VID and p.pid == USB_PID]
+    return pico_serial.list_ports(USB_VID, USB_PID)
 
 
 def find_port():
@@ -547,8 +550,7 @@ def find_port():
 
 
 def open_serial(name):
-    import serial  # pyserial
-    return serial.Serial(name, 115200, timeout=0.05, write_timeout=10)
+    return pico_serial.open_port(name, timeout=0.05, write_timeout=10)
 
 
 def main(argv=None):
@@ -569,12 +571,9 @@ def main(argv=None):
     flash.add_argument("--log", help="write the bootloader's transcript to this file")
     args = parser.parse_args(argv)
 
-    if args.command in ("ports", "flash"):
-        try:
-            import serial  # noqa: F401  pyserial
-        except ImportError:
-            print("This needs pyserial: py -m pip install pyserial")
-            return 1
+    if args.command in ("ports", "flash") and pico_serial.backend() is None:
+        print("This needs pyserial: py -m pip install pyserial")
+        return 1
 
     if args.command == "ports":
         ports = serial_ports()

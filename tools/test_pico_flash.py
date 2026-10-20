@@ -8,14 +8,19 @@ that ends the session, CA CA as a cancel), and the report with the STM32 CRC.
 Run: py tools/test_pico_flash.py
 """
 
+import contextlib
+import io
 import os
 import random
 import struct
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pico_flash as pf  # noqa: E402
+import pico_serial  # noqa: E402
 
 MENU = (b"\r\n================== Main Menu ============================\r\n\n"
         b"  Download Image To the STM32F4xx Internal Flash ------- 1\r\n\n"
@@ -408,6 +413,58 @@ class Flashing(unittest.TestCase):
         with self.assertRaises(pf.FlashError):
             pf.check_running(lambda name: FakeBootloader(), lambda: None, "COM9",
                              fast_timeouts(), settle=0)
+
+
+class WithoutPyserial(unittest.TestCase):
+    """The command line with no pyserial: Win32 on Windows, a message elsewhere."""
+
+    def setUp(self):
+        self.opened = []
+        self.fake = FakeBootloader()
+
+        def win_serial(name, timeout, write_timeout):
+            self.opened.append((name, timeout, write_timeout))
+            return self.fake
+
+        patches = [mock.patch.object(pico_serial, "_pyserial", lambda: None),
+                   mock.patch.object(pico_serial, "_WINDOWS", True),
+                   mock.patch.object(pico_serial, "WinSerial", win_serial),
+                   mock.patch.object(pico_serial, "_registry_instances",
+                                     lambda vid, pid: [("COM3", "USB Serial Device (COM3)")]),
+                   mock.patch.object(pico_serial, "_present_names", lambda: {"COM3"})]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_main(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = pf.main(list(argv))
+        return status, out.getvalue()
+
+    def test_ports_lists_the_registry_port(self):
+        status, out = self.run_main("ports")
+        self.assertEqual(status, 0)
+        self.assertIn("COM3  USB Serial Device (COM3)", out)
+
+    def test_flash_goes_through_the_win32_port(self):
+        image = make_image(5000)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "power_pico.bin")
+            with open(path, "wb") as handle:
+                handle.write(image)
+            status, out = self.run_main("flash", path, "--yes")
+        self.assertEqual(status, 0, out)
+        self.assertEqual(self.opened, [("COM3", 0.05, 10)])
+        self.assertEqual(bytes(self.fake.flash[:len(image)]), image)
+        self.assertIn("Verified", out)
+
+    def test_elsewhere_it_asks_for_pyserial(self):
+        with mock.patch.object(pico_serial, "_WINDOWS", False):
+            status, out = self.run_main("ports")
+        self.assertEqual(status, 1)
+        self.assertIn("pip install pyserial", out)
+        self.assertEqual(self.opened, [])
 
 
 if __name__ == "__main__":
