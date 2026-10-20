@@ -14,18 +14,7 @@ static lv_obj_t * ui_LabelPPSCur = NULL;
 static lv_obj_t * ui_LabelPPSCurUnit = NULL;
 static lv_obj_t * ui_Spinner1 = NULL;
 static lv_obj_t * ui_PanelPPS = NULL;
-static lv_obj_t * ui_BtnSet1 = NULL;
-static lv_obj_t * ui_LabelSet1 = NULL;
-static lv_obj_t * ui_BtnSet2 = NULL;
-static lv_obj_t * ui_LabelSet2 = NULL;
-static lv_obj_t * ui_BtnSet3 = NULL;
-static lv_obj_t * ui_LabelSet3 = NULL;
-static lv_obj_t * ui_BtnSet4 = NULL;
-static lv_obj_t * ui_LabelSet4 = NULL;
-static lv_obj_t * ui_BtnSet5 = NULL;
-static lv_obj_t * ui_LabelSet5 = NULL;
-static lv_obj_t * ui_BtnSet6 = NULL;
-static lv_obj_t * ui_LabelSet6 = NULL;
+static lv_obj_t * ui_PresetList = NULL;
 static lv_obj_t * ui_BtnValSet = NULL;
 static lv_obj_t * ui_LabelValSet = NULL;
 static lv_obj_t * ui_BtnValDec = NULL;
@@ -49,8 +38,27 @@ static lv_timer_t* ui_pps_timer = NULL;
 
 static uint8_t pps_voltage_index = 0; // 6-settings: 0:5V, 1:9V, 2:12V, 3:15V, 4:18V, 5:20V
 static uint8_t pps_panel_index = 1; // 1 or 2
-static lv_obj_t * btns[14];        // 存储所有 btn 的指针
+// Presets, in list order. 3.3, 3.7 and 4.2 V are the alarm-clock bench's
+// cell voltages; the list scrolls, so the original six stay.
+#define PPS_PRESET_NUM 9
+static const float pps_preset_v[PPS_PRESET_NUM] = {3.3f, 3.7f, 4.2f, 5.0f, 9.0f, 12.0f, 15.0f, 18.0f, 20.0f};
+static const char * const pps_preset_label[PPS_PRESET_NUM] = {
+    "3.3V  1A", "3.7V  1A", "4.2V  1A", "5V  1A", "9V  1A", "12V  1A", "15V  1A", "18V  1A", "20V  1A"};
+#define PPS_PRESET_DEFAULT 3   // 5 V: selected when the page opens, as before
+
+// btns[]: panel 1 = presets, switch, close; panel 2 = V-, V+, I-, I+, switch, close
+#define BTN_SWITCH_1 (PPS_PRESET_NUM)
+#define BTN_CLOSE_1  (PPS_PRESET_NUM + 1)
+#define BTN_VOL_DEC  (PPS_PRESET_NUM + 2)
+#define BTN_VOL_INC  (PPS_PRESET_NUM + 3)
+#define BTN_CUR_DEC  (PPS_PRESET_NUM + 4)
+#define BTN_CUR_INC  (PPS_PRESET_NUM + 5)
+#define BTN_SWITCH_2 (PPS_PRESET_NUM + 6)
+#define BTN_CLOSE_2  (PPS_PRESET_NUM + 7)
+#define BTN_COUNT    (PPS_PRESET_NUM + 8)
+static lv_obj_t * btns[BTN_COUNT];        // 存储所有 btn 的指针
 static int current_btn_index = 0; // 当前选中的 btn 索引
+static int pps_last_preset = PPS_PRESET_DEFAULT; // 最后应用的预设：返回预设面板时光标回到这里
 
 static float cur_voltage = 5.0;
 static float cur_current = 1.0;
@@ -87,7 +95,7 @@ static void _switch_pps_panel(void)
         pps_panel_index = 2;
         // 取消当前对象红色边框
         lv_obj_set_style_border_width(btns[current_btn_index], 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-        current_btn_index = 8;
+        current_btn_index = BTN_VOL_DEC;
         // 设置当前对象红色边框
         lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_label_set_text(ui_LabelSwitch, _("press here to Fixed Set"));
@@ -103,9 +111,10 @@ static void _switch_pps_panel(void)
         pps_panel_index = 1;
         // 取消当前对象红色边框
         lv_obj_set_style_border_width(btns[current_btn_index], 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-        current_btn_index = 0;
+        current_btn_index = pps_last_preset;
         // 设置当前对象红色边框
         lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_scroll_to_view(btns[current_btn_index], LV_ANIM_OFF);
         lv_label_set_text(ui_LabelSwitch, _("press to Step Adjust"));
         if(ui_get_language_select() == 0)
             lv_obj_set_style_text_font(ui_LabelSwitch, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -122,23 +131,23 @@ static void _switch_btn(bool inc)
     // 加减
     if(inc) {
         current_btn_index++;
-        if (pps_panel_index == 1 && current_btn_index > 7) {
+        if (pps_panel_index == 1 && current_btn_index > BTN_CLOSE_1) {
             current_btn_index = 0;
         }
-        else if (pps_panel_index == 2 && current_btn_index > 13) {
-            current_btn_index = 8;
+        else if (pps_panel_index == 2 && current_btn_index > BTN_CLOSE_2) {
+            current_btn_index = BTN_VOL_DEC;
         }
     } else {
         if (pps_panel_index == 1) {
             if (current_btn_index == 0) {
-                current_btn_index = 7;
+                current_btn_index = BTN_CLOSE_1;
             } else {
                 current_btn_index--;
             }
         }
         else if (pps_panel_index == 2) {
-            if (current_btn_index == 8) {
-                current_btn_index = 13;
+            if (current_btn_index == BTN_VOL_DEC) {
+                current_btn_index = BTN_CLOSE_2;
             } else {
                 current_btn_index--;
             }
@@ -146,6 +155,10 @@ static void _switch_btn(bool inc)
     }
     // 设置当前对象红色边框
     lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // 预设列表可滚动：让选中的预设可见
+    if (current_btn_index < PPS_PRESET_NUM) {
+        lv_obj_scroll_to_view(btns[current_btn_index], LV_ANIM_ON);
+    }
 }
 
 #include "key.h"
@@ -165,70 +178,42 @@ void ui_pps_page_key_handler(void* key_event)
     }
     else if (((key_event_t*)key_event)->id == KEY_ID_Y)
     {
-        switch (current_btn_index)
+        if (current_btn_index < PPS_PRESET_NUM)
         {
-            // 6和12 切换 pps panel
-            case 6:
+            cur_voltage = pps_preset_v[current_btn_index];
+            cur_current = 1.0;
+            pps_last_preset = current_btn_index;
+            ui_send_pps_set_msg(cur_voltage, cur_current);
+        }
+        else switch (current_btn_index)
+        {
+            // 切换 pps panel
+            case BTN_SWITCH_1:
+            case BTN_SWITCH_2:
                 _switch_pps_panel();
                 break;
-            case 12:
-                _switch_pps_panel();
-                break;
-            // 7和13 关闭 PPS
-            case 7:
+            // 关闭 PPS
+            case BTN_CLOSE_1:
+            case BTN_CLOSE_2:
                 ui_send_pdsink_stop_msg();
                 lv_lib_pm_goto("Set Page", 0);
                 break;
-            case 13:
-                ui_send_pdsink_stop_msg();
-                lv_lib_pm_goto("Set Page", 0);
-                break;
-            case 0:
-                cur_voltage = 5.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 1:
-                cur_voltage = 9.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 2:
-                cur_voltage = 12.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 3:
-                cur_voltage = 15.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 4:
-                cur_voltage = 18.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 5:
-                cur_voltage = 20.0;
-                cur_current = 1.0;
-                ui_send_pps_set_msg(cur_voltage, cur_current);
-                break;
-            case 8:
+            case BTN_VOL_DEC:
                 cur_voltage -= 0.1;
                 if (cur_voltage < 3.3) cur_voltage = 3.3;
                 ui_send_pps_set_msg(cur_voltage, cur_current);
                 break;
-            case 9:
+            case BTN_VOL_INC:
                 cur_voltage += 0.1;
                 if (cur_voltage > 20.0) cur_voltage = 20.0;
                 ui_send_pps_set_msg(cur_voltage, cur_current);
                 break;
-            case 10:
+            case BTN_CUR_DEC:
                 cur_current -= 0.1;
                 if (cur_current < 1.0) cur_current = 1.0;
                 ui_send_pps_set_msg(cur_voltage, cur_current);
                 break;
-            case 11:
+            case BTN_CUR_INC:
                 cur_current += 0.1;
                 if (cur_current > 3.0) cur_current = 3.0;
                 ui_send_pps_set_msg(cur_voltage, cur_current);
@@ -241,7 +226,8 @@ void ui_pps_page_key_handler(void* key_event)
 
 /////////////////////// para_initialize //////////////////////
 static void _para_init(void) {
-    current_btn_index = 0;
+    current_btn_index = PPS_PRESET_DEFAULT;
+    pps_last_preset = PPS_PRESET_DEFAULT;
     pps_voltage_index = 0;
     pps_panel_index = 1;
     cur_voltage = 5.0;
@@ -335,119 +321,41 @@ void ui_PPSPage_screen_init(void)
     lv_obj_set_style_border_color(ui_PanelPPS, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(ui_PanelPPS, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_BtnSet1 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet1, 100);
-    lv_obj_set_height(ui_BtnSet1, 30);
-    lv_obj_set_x(ui_BtnSet1, -175);
-    lv_obj_set_y(ui_BtnSet1, -35);
-    lv_obj_set_align(ui_BtnSet1, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet1, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet1, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet1, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // 预设列表：两列，可上下滚动，占原来六个按钮的位置
+    ui_PresetList = lv_obj_create(ui_PanelPPS);
+    lv_obj_set_width(ui_PresetList, 220);
+    lv_obj_set_height(ui_PresetList, 104);
+    lv_obj_set_x(ui_PresetList, -120);
+    lv_obj_set_y(ui_PresetList, 0);
+    lv_obj_set_align(ui_PresetList, LV_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(ui_PresetList, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(ui_PresetList, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_bg_opa(ui_PresetList, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_PresetList, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(ui_PresetList, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_LabelSet1 = lv_label_create(ui_BtnSet1);
-    lv_obj_set_width(ui_LabelSet1, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet1, "5V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet1, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    for (int i = 0; i < PPS_PRESET_NUM; i++) {
+        lv_obj_t * btn = lv_button_create(ui_PresetList);
+        lv_obj_t * label;
 
-    ui_BtnSet2 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet2, 100);
-    lv_obj_set_height(ui_BtnSet2, 30);
-    lv_obj_set_x(ui_BtnSet2, -65);
-    lv_obj_set_y(ui_BtnSet2, -35);
-    lv_obj_set_align(ui_BtnSet2, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet2, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet2, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet2, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet2, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_width(btn, 100);
+        lv_obj_set_height(btn, 30);
+        lv_obj_set_pos(btn, 5 + (i % 2) * 110, 3 + (i / 2) * 35);
+        lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
+        lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+        lv_obj_set_style_border_color(btn, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_opa(btn, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(btn, i == PPS_PRESET_DEFAULT ? 3 : 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_LabelSet2 = lv_label_create(ui_BtnSet2);
-    lv_obj_set_width(ui_LabelSet2, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet2, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet2, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet2, "9V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet2, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+        label = lv_label_create(btn);
+        lv_obj_set_width(label, LV_SIZE_CONTENT);   /// 1
+        lv_obj_set_height(label, LV_SIZE_CONTENT);    /// 1
+        lv_obj_set_align(label, LV_ALIGN_CENTER);
+        lv_label_set_text(label, pps_preset_label[i]);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_BtnSet3 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet3, 100);
-    lv_obj_set_height(ui_BtnSet3, 30);
-    lv_obj_set_x(ui_BtnSet3, -175);
-    lv_obj_set_y(ui_BtnSet3, 0);
-    lv_obj_set_align(ui_BtnSet3, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet3, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet3, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet3, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet3, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet3, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_LabelSet3 = lv_label_create(ui_BtnSet3);
-    lv_obj_set_width(ui_LabelSet3, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet3, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet3, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet3, "12V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet3, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_BtnSet4 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet4, 100);
-    lv_obj_set_height(ui_BtnSet4, 30);
-    lv_obj_set_x(ui_BtnSet4, -65);
-    lv_obj_set_y(ui_BtnSet4, 0);
-    lv_obj_set_align(ui_BtnSet4, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet4, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet4, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet4, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet4, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_LabelSet4 = lv_label_create(ui_BtnSet4);
-    lv_obj_set_width(ui_LabelSet4, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet4, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet4, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet4, "15V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet4, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_BtnSet5 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet5, 100);
-    lv_obj_set_height(ui_BtnSet5, 30);
-    lv_obj_set_x(ui_BtnSet5, -175);
-    lv_obj_set_y(ui_BtnSet5, 35);
-    lv_obj_set_align(ui_BtnSet5, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet5, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet5, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet5, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet5, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet5, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_LabelSet5 = lv_label_create(ui_BtnSet5);
-    lv_obj_set_width(ui_LabelSet5, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet5, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet5, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet5, "18V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet5, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_BtnSet6 = lv_button_create(ui_PanelPPS);
-    lv_obj_set_width(ui_BtnSet6, 100);
-    lv_obj_set_height(ui_BtnSet6, 30);
-    lv_obj_set_x(ui_BtnSet6, -65);
-    lv_obj_set_y(ui_BtnSet6, 35);
-    lv_obj_set_align(ui_BtnSet6, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_BtnSet6, LV_OBJ_FLAG_SCROLL_ON_FOCUS);     /// Flags
-    lv_obj_remove_flag(ui_BtnSet6, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_obj_set_style_border_color(ui_BtnSet6, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_opa(ui_BtnSet6, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnSet6, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_LabelSet6 = lv_label_create(ui_BtnSet6);
-    lv_obj_set_width(ui_LabelSet6, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_LabelSet6, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_align(ui_LabelSet6, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_LabelSet6, "20V  1A");
-    lv_obj_set_style_text_font(ui_LabelSet6, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+        btns[i] = btn;
+    }
 
     ui_BtnValSet = lv_button_create(ui_PanelPPS);
     lv_obj_set_width(ui_BtnValSet, 100);
@@ -613,20 +521,15 @@ void ui_PPSPage_screen_init(void)
     ui_pps_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
 
     // store panels in array
-    btns[0] = ui_BtnSet1;
-    btns[1] = ui_BtnSet2;
-    btns[2] = ui_BtnSet3;
-    btns[3] = ui_BtnSet4;
-    btns[4] = ui_BtnSet5;
-    btns[5] = ui_BtnSet6;
-    btns[6] = ui_BtnSwitch;
-    btns[7] = ui_BtnClose;
-    btns[8] = ui_BtnValDec;
-    btns[9] = ui_BtnValInc;
-    btns[10] = ui_BtnCurDec;
-    btns[11] = ui_BtnCurInc;
-    btns[12] = ui_BtnSwitch;
-    btns[13] = ui_BtnClose;
+    // btns[0 .. PPS_PRESET_NUM-1] are set where the preset list is built
+    btns[BTN_SWITCH_1] = ui_BtnSwitch;
+    btns[BTN_CLOSE_1] = ui_BtnClose;
+    btns[BTN_VOL_DEC] = ui_BtnValDec;
+    btns[BTN_VOL_INC] = ui_BtnValInc;
+    btns[BTN_CUR_DEC] = ui_BtnCurDec;
+    btns[BTN_CUR_INC] = ui_BtnCurInc;
+    btns[BTN_SWITCH_2] = ui_BtnSwitch;
+    btns[BTN_CLOSE_2] = ui_BtnClose;
     //
     _para_init();
 }
