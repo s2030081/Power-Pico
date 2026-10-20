@@ -7,6 +7,7 @@ talks to the port through the Win32 API. Each script's docstring says how to use
 | Script | What it does |
 | --- | --- |
 | `pico_flash.py` | Flashes an application image through the USB bootloader, with checks before and after |
+| `pico_boot.py` | Asks the running firmware to restart into the bootloader (command 0x15), so no button is needed |
 | `pico_vlog.py` | Logs the USB stream to a file and prints input VBUS once a second |
 | `pico_dlog.py` | The same, and prints the debug build's PD events as they arrive |
 | `pico_vtrace.py` | Analyses a logged stream: gaps, VBUS under 1 V and over 4.75 V, plateaus, and an SVG plot |
