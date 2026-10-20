@@ -118,7 +118,13 @@ void handle_FUSB302_event(FUSB302_event_t events)
         }
         /* TODO: handle no cc detected error */
         if (cc > 1) {
+            /* Wait the full TYPEC_SINK_WAIT_CAP for the source's own
+               capabilities before asking for them. Without restarting the
+               timer, Get_Source_Capabilities went out 0.4 ms after attach,
+               and the charger answered it with a hard reset (2026-10-21). */
             app_pd.wait_src_cap = 1;
+            app_pd.time_wait_src_cap = clock_ms();
+            app_pd.get_src_cap_retry_count = 0;
         } else {
             set_default_power();
         }
