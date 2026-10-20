@@ -53,7 +53,9 @@ volatile TaskHandle_t g_overflow_task_handle = 0;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 1,
+  /* 512 bytes, as before 58b3446. With 128 the task overflows (it peaks at
+     140 bytes, measured 2026-10-21) and the overflow hook stops the unit. */
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 
