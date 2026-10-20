@@ -1,6 +1,7 @@
 #include "fusb302_dev.h"
 #include "i2c.h"
 #include "cmsis_os2.h"
+#include "user_DebugTrace.h"
 
 #define FUSB302_USE_OS 1
 
@@ -90,10 +91,12 @@ void handle_protocol_event(PD_protocol_event_t events)
                 PD_protocol_get_PPS_voltage(&app_pd.protocol), PD_protocol_get_PPS_current(&app_pd.protocol));
                 app_pd.state = PD_STATE_SUCCESS_PPS; // 更新状态：成功协商到PPS
             }
+            dbg_log(DBG_EV_PSRDY_DONE, (uint8_t)p.type, PD_protocol_get_PPS_voltage(&app_pd.protocol), selected_power);
         } else {
             FUSB302_set_vbus_sense(&fusb302_dev, 1);
             status_power_ready(STATUS_POWER_TYP, p.max_v, p.max_i);
             app_pd.state = PD_STATE_SUCCESS_FIXED; // 更新状态：协商到了一个固定电压
+            dbg_log(DBG_EV_PSRDY_DONE, (uint8_t)p.type, PD_protocol_get_PPS_voltage(&app_pd.protocol), selected_power);
         }
     }
 }
@@ -101,6 +104,7 @@ void handle_protocol_event(PD_protocol_event_t events)
 void handle_FUSB302_event(FUSB302_event_t events)
 {
     if (events & FUSB302_EVENT_DETACHED) {
+        dbg_log(DBG_EV_DETACH, 0, 0, 0);
         PD_protocol_reset(&app_pd.protocol);
         app_pd.cc = 0;
         return;
@@ -116,6 +120,7 @@ void handle_FUSB302_event(FUSB302_event_t events)
             cc = cc2;
             app_pd.cc = 2;
         }
+        dbg_log(DBG_EV_ATTACH, cc, (uint16_t)((cc1 << 8) | cc2), 0);
         /* TODO: handle no cc detected error */
         if (cc > 1) {
             app_pd.wait_src_cap = 1;
@@ -128,6 +133,7 @@ void handle_FUSB302_event(FUSB302_event_t events)
         uint16_t header;
         uint32_t obj[7];
         FUSB302_get_message(&fusb302_dev, &header, obj);
+        dbg_log(DBG_EV_RX, 0, header, ((header >> 12) & 7) ? obj[0] : 0);
         PD_protocol_handle_msg(&app_pd.protocol, header, obj, &protocol_event);
         if (protocol_event) {
             handle_protocol_event(protocol_event);
@@ -138,6 +144,9 @@ void handle_FUSB302_event(FUSB302_event_t events)
         uint32_t obj[7];
         delay_ms(4);  /* Delay respond in case there are retry messages */
         if (PD_protocol_respond(&app_pd.protocol, &header, obj)) {
+            uint8_t is_request = ((header >> 12) & 7) && (header & 0x1F) == 0x2;
+            dbg_log(is_request ? DBG_EV_TX_REQUEST : DBG_EV_TX_OTHER, is_request ? 2 : 1,
+                    header, ((header >> 12) & 7) ? obj[0] : 0);
             FUSB302_tx_sop(&fusb302_dev, header, obj);
         }
     }
@@ -153,20 +162,24 @@ bool fusb302_timer(void)
             app_pd.get_src_cap_retry_count += 1;
             /* Try to request soruce capabilities message (will not cause power cycle VBUS) */
             PD_protocol_create_get_src_cap(&app_pd.protocol, &header);
+            dbg_log(DBG_EV_TX_OTHER, 0, header, 0);
             FUSB302_tx_sop(&fusb302_dev, header, 0);
         } else {
             app_pd.get_src_cap_retry_count = 0;
             /* Hard reset will cause the source power cycle VBUS. */
+            dbg_log(DBG_EV_HARDRST_TX, 0, 0, 0);
             FUSB302_tx_hard_reset(&fusb302_dev);
             PD_protocol_reset(&app_pd.protocol);
         }
     }
     if (app_pd.wait_ps_rdy) {
         if (t - app_pd.time_wait_ps_rdy > REQUEST_TO_PS_READY) {
+            dbg_log(DBG_EV_PSRDY_TIMEOUT, 0, (uint16_t)(t - app_pd.time_wait_ps_rdy), 0);
             app_pd.wait_ps_rdy = 0;
             set_default_power();
         }
     } else if (app_pd.send_request || (app_pd.status_power == STATUS_POWER_PPS && t - app_pd.time_PPS_request > PPS_REQUEST)) {
+        uint8_t reason = app_pd.send_request ? 0 : 1;
         app_pd.wait_ps_rdy = 1;
         app_pd.send_request = 0;
         app_pd.state = PD_STATE_NEGOTIATING; // 更新状态：正在协商中
@@ -175,6 +188,7 @@ bool fusb302_timer(void)
         uint32_t obj[7];
         /* Send request if option updated or regularly in PPS mode to keep power alive */
         PD_protocol_create_request(&app_pd.protocol, &header, obj);
+        dbg_log(DBG_EV_TX_REQUEST, reason, header, obj[0]);
         app_pd.time_wait_ps_rdy = clock_ms();
         FUSB302_tx_sop(&fusb302_dev, header, obj);
     }

@@ -4,6 +4,7 @@
 #include "user_PDUFPTask.h"
 #include "main.h"
 #include "fusb302_dev.h"
+#include "user_DebugTrace.h"
 /* Private typedef -----------------------------------------------------------*/
 
 /* Private define ------------------------------------------------------------*/
@@ -52,12 +53,14 @@ void PDUFPTask(void *argument)
   PD_command_msg_t ui_msg;
   // 创建定时器
   PD_UFP_Task_timer_id = osTimerNew(_timer_callback, osTimerPeriodic, NULL, NULL);
+  dbg_watchdog_start();
 	while(1)
 	{
     // 非阻塞获取消息
     if(osMessageQueueGet(PD_cmd_MessageQueue, &ui_msg, NULL, 0)==osOK) {
       if(!_pd_working_status && ui_msg.event == PD_CMD_START) {
         // FUSB CC pin connect
+        dbg_log(DBG_EV_PD_START, 0, 0, 0);
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
         PD_protocol_init(&app_pd.protocol);
         PD_protocol_set_power_option(&app_pd.protocol, PD_POWER_OPTION_MAX_5V);
@@ -70,6 +73,7 @@ void PDUFPTask(void *argument)
         _pd_working_status = 1;
 
       } else if(_pd_working_status && ui_msg.event == PD_CMD_STOP) {
+        dbg_log(DBG_EV_PD_STOP, 0, 0, 0);
         // FUSB CC pin disconnect
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
         _pd_working_status = 0;
@@ -77,6 +81,7 @@ void PDUFPTask(void *argument)
       } else if(_pd_working_status && ui_msg.event == PD_CMD_SET_PPS) {
         // 设置PPS电压电流
         if(ui_msg.pps_set_voltage > 0 && ui_msg.pps_set_current > 0 && ui_msg.pps_set_voltage <= 20.0 && ui_msg.pps_set_current <= 5.0) {
+          dbg_log(DBG_EV_SET_PPS, PPS_A(ui_msg.pps_set_current), PPS_V(ui_msg.pps_set_voltage), 0);
           PD_protocol_set_PPS(&app_pd.protocol, PPS_V(ui_msg.pps_set_voltage), PPS_A(ui_msg.pps_set_current), false);
           send_power_request();
         }
@@ -121,6 +126,7 @@ void PDUFPTask(void *argument)
           }
       }
     }
+    dbg_service();
 		osDelay(1);
 	}
 }

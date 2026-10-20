@@ -53,12 +53,14 @@ volatile TaskHandle_t g_overflow_task_handle = 0;
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .stack_size = 128 * 1,
+  /* Debug build test: 128 * 4 as before upstream 58b3446; 128 * 1 overflowed. */
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+#include "user_DebugTrace.h"
 
 /* USER CODE END FunctionPrototypes */
 
@@ -79,6 +81,7 @@ void vApplicationTickHook( void )
    added here, but the tick hook is called from an interrupt context, so
    code must not attempt to block, and only the interrupt safe FreeRTOS API
    functions can be used (those that end in FromISR()). */
+  dbg_tick();
   TaskTickHook();
 }
 
@@ -87,14 +90,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
   g_overflow_task_handle = xTask;
   g_overflow_task_name = pcTaskName;
 
-  taskDISABLE_INTERRUPTS();
-
-  /* Set a breakpoint here to inspect pcTaskName and call stack. */
-  __BKPT(0);
-
-  for(;;)
-  {
-  }
+  /* Debug build: record the task and reset (user_DebugTrace.c). */
+  dbg_stack_overflow(xTask, pcTaskName);
 }
 /* USER CODE END 3 */
 

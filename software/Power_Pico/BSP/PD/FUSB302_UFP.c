@@ -17,6 +17,7 @@
 
 #include <string.h>
 #include "FUSB302_UFP.h"
+#include "user_DebugTrace.h"
 
 /* Switches0 : 02h */
 #define PU_EN2          (0x01 << 7)
@@ -357,6 +358,11 @@ static FUSB302_ret_t FUSB302_state_unattached(FUSB302_dev_t *dev, FUSB302_event_
 static FUSB302_ret_t FUSB302_state_attached(FUSB302_dev_t *dev, FUSB302_event_t * events)
 {
     REG_READ(ADDRESS_STATUS0A, &REG_STATUS0A, 7);
+    if (REG_INTERRUPTA || REG_INTERRUPTB || (REG_INTERRUPT & (I_COLLISION | I_ALERT | I_VBUSOK))) {
+        dbg_log(DBG_EV_FUSB_STATUS, REG_INTERRUPTA, (uint16_t)((REG_INTERRUPTB << 8) | REG_INTERRUPT),
+                ((uint32_t)REG_STATUS0A << 24) | ((uint32_t)REG_STATUS1A << 16)
+                | ((uint32_t)REG_STATUS0 << 8) | REG_STATUS1);
+    }
     dev->interrupta |= REG_INTERRUPTA;
     dev->interruptb |= REG_INTERRUPTB;
     if (dev->vbus_sense && ((REG_STATUS0 & VBUSOK) == 0)) {
@@ -379,6 +385,7 @@ static FUSB302_ret_t FUSB302_state_attached(FUSB302_dev_t *dev, FUSB302_event_t 
     }
     if (REG_STATUS0A & HARDRST) {
         uint8_t reg_control = PD_RESET;
+        dbg_log(DBG_EV_HARDRST_RX, 0, 0, 0);
         REG_WRITE(ADDRESS_RESET, &reg_control, 1);
         return FUSB302_SUCCESS;
     }

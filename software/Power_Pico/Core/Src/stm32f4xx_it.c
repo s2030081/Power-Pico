@@ -88,16 +88,29 @@ void NMI_Handler(void)
 /**
   * @brief This function handles Hard fault interrupt.
   */
-void HardFault_Handler(void)
+__attribute__((naked)) void HardFault_Handler(void)
 {
-  /* USER CODE BEGIN HardFault_IRQn 0 */
+  /* Debug build: pass the stacked frame to dbg_fault (user_DebugTrace.c),
+     which records it and resets. */
+  __asm volatile(
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "b dbg_fault     \n");
+}
 
-  /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
-  }
+/* Debug build: the tick watchdog (user_DebugTrace.c), TIM3 at priority 2. */
+__attribute__((naked)) void TIM3_IRQHandler(void)
+{
+  __asm volatile(
+    "tst lr, #4      \n"
+    "ite eq          \n"
+    "mrseq r0, msp   \n"
+    "mrsne r0, psp   \n"
+    "mov r1, lr      \n"
+    "b dbg_watchdog_irq \n");
 }
 
 /**

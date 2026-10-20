@@ -29,6 +29,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "user_DebugTrace.h"
 
 /* USER CODE END Includes */
 
@@ -75,6 +76,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
   //this must set same as keil setting
   SCB->VTOR = FLASH_BASE + 0x00010000U;
+  dbg_boot();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -208,10 +210,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  dbg_error_handler(__builtin_return_address(0));
   /* USER CODE END Error_Handler_Debug */
 }
 
