@@ -20,6 +20,17 @@ extern float ui_current_current;
 
 void ui_full_screen_refresh(lv_obj_t * screen);
 
+///////////////////// value formatting ////////////////////
+// Shared by every page that shows a measurement, so the PD pages print the
+// same digits as the main page.
+
+// 4 significant digits: 0.000 / 5.000 / 20.00 / 123.4 / 1234
+void ui_fmt_sig4(char *buf, size_t size, float v);
+// current given in uA, auto-ranged to uA / mA / A; *unit receives the unit text
+void ui_fmt_current(char *buf, size_t size, float current_uA, const char **unit);
+// power given in W, auto-ranged to uW / mW / W; *unit receives the unit text
+void ui_fmt_power(char *buf, size_t size, float power_W, const char **unit);
+
 ///////////// interface for system settings ////////////
 
 // get functions
@@ -52,12 +63,25 @@ void ui_system_settings_save(void);
 
 ///////////// interface for com with PD UFP Task //////////////
 
+// Which PD contract the sink currently holds. PD stays on, and its page stays
+// reachable from the Set page, for as long as this is not OFF.
+typedef enum {
+    UI_PD_MODE_OFF = 0,
+    UI_PD_MODE_PPS,
+    UI_PD_MODE_FIXED,
+} ui_pd_mode_t;
+
 void ui_send_pdsink_start_msg(void);
 void ui_send_pdsink_stop_msg(void);
 void ui_send_pps_set_msg(float voltage, float current);
 void ui_send_pd_fixed_set_msg(uint8_t level);
 int8_t MsgQueueGet_PPS_ready(void);
 int8_t MsgQueueGet_PD_ready(void);
+ui_pd_mode_t ui_pd_get_mode(void);
+// name of the page that controls the active contract, NULL when PD is off
+const char * ui_pd_get_page_name(void);
+// counts PD sink starts; a PD page resets its own state when it sees a new value
+uint8_t ui_pd_get_session(void);
 
 ///////////////////////////////////////////////////////////////
 

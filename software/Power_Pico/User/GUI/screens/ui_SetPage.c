@@ -216,16 +216,30 @@ void ui_set_page_key_handler(void *key_event)
                 break;
             }
 
-            // PPS page
+            // PD sink: 确认键开启诱骗 (已开启则直接进入诱骗页面)，取消键关闭诱骗
             case 5:
-                // 发送开启PD诱骗的信号
                 if (((key_event_t*)key_event)->id == KEY_ID_Y && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
                 {
-                    // 发送pps开始信号到PD UFP Task
-                    ui_send_pdsink_start_msg();
-                    // 弹出 msgbox 等待PD完成，并锁住按键操作
-                    show_wait_msgbox();
-                    // lv_lib_pm_goto("PPS Page", NULL);
+                    if (ui_pd_get_mode() != UI_PD_MODE_OFF)
+                    {
+                        // 诱骗仍在进行：回到对应的 PD 页面，不重新协商
+                        lv_lib_pm_goto(ui_pd_get_page_name(), 0);
+                    }
+                    else
+                    {
+                        // 发送pps开始信号到PD UFP Task
+                        ui_send_pdsink_start_msg();
+                        // 弹出 msgbox 等待PD完成，并锁住按键操作
+                        show_wait_msgbox();
+                    }
+                }
+                else if (((key_event_t*)key_event)->id == KEY_ID_N && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
+                {
+                    if (ui_pd_get_mode() != UI_PD_MODE_OFF)
+                    {
+                        ui_send_pdsink_stop_msg();
+                    }
+                    lv_obj_clear_state(ui_SwitchPPS, LV_STATE_CHECKED);
                 }
                 break;
 
@@ -276,6 +290,12 @@ static void _setting_init(void) {
     }
 
     _set_range_label_text(ui_get_current_range_mode());
+
+    // PD sink: 开关显示诱骗是否仍在进行 (离开诱骗页面并不会关闭诱骗)
+    if(ui_pd_get_mode() != UI_PD_MODE_OFF)
+        lv_obj_add_state(ui_SwitchPPS, LV_STATE_CHECKED);
+    else
+        lv_obj_clear_state(ui_SwitchPPS, LV_STATE_CHECKED);
 }
 
 /////////////////////// ui_components //////////////////////

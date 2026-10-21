@@ -29,18 +29,22 @@ static lv_obj_t * ui_LabelPDClose = NULL;
 static lv_timer_t * ui_pd_fixed_timer = NULL;
 static lv_obj_t * btns[6];
 static int current_btn_index = 0;
+static uint8_t pd_fixed_session = 0; // 本页上次初始化时的 PD 诱骗会话号
 
 ///////////////// timer functions ///////////////////
 
 static void _flush_timer_cb(lv_timer_t * timer) {
-    char buf[8];
+    // 刷新电压电流显示：与主界面相同的 4 位有效数字和自动单位
+    char buf[16];
+    const char * unit = "";
     float voltage = 0.0f;
     float current = 0.0f;
     ui_get_vol_cur(&voltage, &current);
-    sprintf(buf, "%.2f", voltage);
+    ui_fmt_sig4(buf, sizeof(buf), voltage);
     lv_label_set_text(ui_LabelPDVol, buf);
-    sprintf(buf, "%.2f", current / 1000000.0f);
+    ui_fmt_current(buf, sizeof(buf), current, &unit);
     lv_label_set_text(ui_LabelPDCur, buf);
+    lv_label_set_text(ui_LabelPDCurUnit, unit);
 }
 
 ///////////////// key functions ///////////////////
@@ -69,7 +73,12 @@ void ui_pdfixed_page_key_handler(void* key_event)
 {
     if(((key_event_t*)key_event)->id == KEY_ID_B && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
     {
-        ui_send_pdsink_stop_msg();
+        // 切页键：回主界面看功率，PD 诱骗保持开启
+        lv_lib_pm_goto_first();
+    }
+    else if(((key_event_t*)key_event)->id == KEY_ID_N && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
+    {
+        // 取消键：回设置界面，PD 诱骗保持开启
         lv_lib_pm_goto("Set Page", 0);
     }
     else if(((key_event_t*)key_event)->id == KEY_ID_L || ((key_event_t*)key_event)->id == KEY_ID_R)
@@ -121,66 +130,69 @@ void ui_PDFixedPage_screen_init(void)
     ui_PDFixedPage = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_PDFixedPage, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
+    // 读数面板：数值靠左、单位靠右，宽度容得下 "0.000" + "mA" (montserrat 18 + 14)
     ui_PanelPDVol = lv_obj_create(ui_PDFixedPage);
-    lv_obj_set_width(ui_PanelPDVol, 80);
+    lv_obj_set_width(ui_PanelPDVol, 92);
     lv_obj_set_height(ui_PanelPDVol, 35);
-    lv_obj_set_x(ui_PanelPDVol, -30);
+    lv_obj_set_x(ui_PanelPDVol, -34);
     lv_obj_set_y(ui_PanelPDVol, 10);
     lv_obj_set_align(ui_PanelPDVol, LV_ALIGN_TOP_MID);
     lv_obj_clear_flag(ui_PanelPDVol, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_PanelPDVol, lv_color_hex(0xE36666), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_PanelPDVol, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_hor(ui_PanelPDVol, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPDVol = lv_label_create(ui_PanelPDVol);
     lv_obj_set_width(ui_LabelPDVol, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPDVol, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPDVol, -12);
+    lv_obj_set_x(ui_LabelPDVol, 0);
     lv_obj_set_y(ui_LabelPDVol, 0);
-    lv_obj_set_align(ui_LabelPDVol, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPDVol, "5.42");
+    lv_obj_set_align(ui_LabelPDVol, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_LabelPDVol, "0.000");
     lv_obj_set_style_text_font(ui_LabelPDVol, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPDVolUnit = lv_label_create(ui_PanelPDVol);
     lv_obj_set_width(ui_LabelPDVolUnit, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPDVolUnit, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPDVolUnit, 5);
-    lv_obj_set_y(ui_LabelPDVolUnit, 0);
+    lv_obj_set_x(ui_LabelPDVolUnit, 0);
+    lv_obj_set_y(ui_LabelPDVolUnit, 1);
     lv_obj_set_align(ui_LabelPDVolUnit, LV_ALIGN_RIGHT_MID);
     lv_label_set_text(ui_LabelPDVolUnit, "V");
-    lv_obj_set_style_text_font(ui_LabelPDVolUnit, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelPDVolUnit, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelPDCur = lv_obj_create(ui_PDFixedPage);
-    lv_obj_set_width(ui_PanelPDCur, 80);
+    lv_obj_set_width(ui_PanelPDCur, 92);
     lv_obj_set_height(ui_PanelPDCur, 35);
-    lv_obj_set_x(ui_PanelPDCur, 60);
+    lv_obj_set_x(ui_PanelPDCur, 64);
     lv_obj_set_y(ui_PanelPDCur, 10);
     lv_obj_set_align(ui_PanelPDCur, LV_ALIGN_TOP_MID);
     lv_obj_clear_flag(ui_PanelPDCur, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_PanelPDCur, lv_color_hex(0x42AA49), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_PanelPDCur, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_hor(ui_PanelPDCur, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPDCur = lv_label_create(ui_PanelPDCur);
     lv_obj_set_width(ui_LabelPDCur, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPDCur, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPDCur, -12);
+    lv_obj_set_x(ui_LabelPDCur, 0);
     lv_obj_set_y(ui_LabelPDCur, 0);
-    lv_obj_set_align(ui_LabelPDCur, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPDCur, "2.25");
+    lv_obj_set_align(ui_LabelPDCur, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_LabelPDCur, "0.000");
     lv_obj_set_style_text_font(ui_LabelPDCur, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPDCurUnit = lv_label_create(ui_PanelPDCur);
     lv_obj_set_width(ui_LabelPDCurUnit, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPDCurUnit, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPDCurUnit, 5);
-    lv_obj_set_y(ui_LabelPDCurUnit, 0);
+    lv_obj_set_x(ui_LabelPDCurUnit, 0);
+    lv_obj_set_y(ui_LabelPDCurUnit, 1);
     lv_obj_set_align(ui_LabelPDCurUnit, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPDCurUnit, "A");
-    lv_obj_set_style_text_font(ui_LabelPDCurUnit, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_LabelPDCurUnit, "uA");
+    lv_obj_set_style_text_font(ui_LabelPDCurUnit, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Spinner2 = lv_spinner_create(ui_PDFixedPage);
     lv_obj_set_width(ui_Spinner2, 25);
     lv_obj_set_height(ui_Spinner2, 25);
-    lv_obj_set_x(ui_Spinner2, -90);
+    lv_obj_set_x(ui_Spinner2, -98);
     lv_obj_set_y(ui_Spinner2, 15);
     lv_obj_set_align(ui_Spinner2, LV_ALIGN_TOP_MID);
     lv_obj_clear_flag(ui_Spinner2, LV_OBJ_FLAG_CLICKABLE);      /// Flags
@@ -198,7 +210,7 @@ void ui_PDFixedPage_screen_init(void)
     lv_obj_clear_flag(ui_BtnPDSet1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_border_color(ui_BtnPDSet1, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_opa(ui_BtnPDSet1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_width(ui_BtnPDSet1, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(ui_BtnPDSet1, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPDSet1 = lv_label_create(ui_BtnPDSet1);
     lv_obj_set_width(ui_LabelPDSet1, LV_SIZE_CONTENT);   /// 1
@@ -304,8 +316,6 @@ void ui_PDFixedPage_screen_init(void)
     lv_label_set_text(ui_LabelPDClose, _("press here to close PD"));
     lv_obj_set_style_text_font(ui_LabelPDClose, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_pd_fixed_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
-
     btns[0] = ui_BtnPDSet1;
     btns[1] = ui_BtnPDSet2;
     btns[2] = ui_BtnPDSet3;
@@ -313,8 +323,15 @@ void ui_PDFixedPage_screen_init(void)
     btns[4] = ui_BtnPDSet5;
     btns[5] = ui_BtnPDClose;
 
-    _para_init();
+    // 同一次诱骗内从主界面/设置界面切回时光标留在原处，新一次诱骗才重置
+    if (pd_fixed_session != ui_pd_get_session()) {
+        pd_fixed_session = ui_pd_get_session();
+        _para_init();
+    }
+    lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    _flush_timer_cb(NULL);
+    ui_pd_fixed_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
 }
 
 void ui_PDFixedPage_screen_destroy(void)

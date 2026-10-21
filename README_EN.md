@@ -119,6 +119,8 @@ Install and use the PowerPico Client. Currently, it only supports Windows operat
 
     First, enter the Settings interface, go to the Spoof/Trigger option, click confirm to enter, and then you can adjust the voltage. Note: Currently, only PPS triggering is supported! Make sure to check if your charger block supports the corresponding protocols during testing.
 
+    Once PD is on, the top page button returns to the main screen to watch voltage, current and power while PD keeps running, and the cancel button (×) returns to Settings with PD still on. The PD Sink switch in Settings shows whether PD is running: confirm re-opens the PD page, cancel turns PD off. The close button on the PD page turns PD off as well.
+
     <p align="center">
         <img width="100%" src="./images/test/PPS.gif">
     </p>

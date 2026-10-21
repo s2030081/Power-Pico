@@ -62,19 +62,22 @@ static int pps_last_preset = PPS_PRESET_DEFAULT; // 最后应用的预设：返�
 
 static float cur_voltage = 5.0;
 static float cur_current = 1.0;
+static uint8_t pps_session = 0; // 本页上次初始化时的 PD 诱骗会话号
 
 ///////////////// timer functions ///////////////////
 
 static void _flush_timer_cb(lv_timer_t * timer) {
-    // 刷新 PPS 电压电流显示
-    char buf[5];
-    float voltage = 0.0;
-    float current = 0.0;
+    // 刷新 PPS 电压电流显示：与主界面相同的 4 位有效数字和自动单位
+    char buf[16];
+    const char * unit = "";
+    float voltage = 0.0f;
+    float current = 0.0f;
     ui_get_vol_cur(&voltage, &current);
-    sprintf(buf, "%.2f", voltage);
+    ui_fmt_sig4(buf, sizeof(buf), voltage);
     lv_label_set_text(ui_LabelPPSVol, buf);
-    sprintf(buf, "%.2f", current/1000000.0); // 转换为 A
+    ui_fmt_current(buf, sizeof(buf), current, &unit);
     lv_label_set_text(ui_LabelPPSCur, buf);
+    lv_label_set_text(ui_LabelPPSCurUnit, unit);
 }
 
 ///////////////// key function ///////////////////
@@ -166,7 +169,13 @@ void ui_pps_page_key_handler(void* key_event)
 {
     if(((key_event_t*)key_event)->id == KEY_ID_B && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
     {
-        _switch_pps_panel();
+        // 切页键：回主界面看功率，PPS 诱骗保持开启 (面板切换用屏幕上的切换按钮)
+        lv_lib_pm_goto_first();
+    }
+    else if(((key_event_t*)key_event)->id == KEY_ID_N && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
+    {
+        // 取消键：回设置界面，PPS 诱骗保持开启
+        lv_lib_pm_goto("Set Page", 0);
     }
     else if(((key_event_t*)key_event)->id == KEY_ID_L || ((key_event_t*)key_event)->id == KEY_ID_R)
     {
@@ -234,6 +243,19 @@ static void _para_init(void) {
     cur_current = 1.0;
 }
 
+// 按记住的参数恢复界面：面板位置、切换提示、设定值与光标
+static void _restore_view(void) {
+    if (pps_panel_index == 2) {
+        lv_obj_set_x(ui_PanelPPS, -120);
+        lv_label_set_text(ui_LabelSwitch, _("press here to Fixed Set"));
+    }
+    _set_label_val_cur();
+    lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    if (current_btn_index < PPS_PRESET_NUM) {
+        lv_obj_scroll_to_view(btns[current_btn_index], LV_ANIM_OFF);
+    }
+}
+
 /////////////////////// ui_initialize //////////////////////
 
 void ui_PPSPage_screen_init(void)
@@ -241,67 +263,70 @@ void ui_PPSPage_screen_init(void)
     ui_PPSPage = lv_obj_create(NULL);
     lv_obj_remove_flag(ui_PPSPage, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
+    // 读数面板：数值靠左、单位靠右，宽度容得下 "0.000" + "mA" (montserrat 18 + 14)
     ui_PanelPPSVol = lv_obj_create(ui_PPSPage);
-    lv_obj_set_width(ui_PanelPPSVol, 80);
+    lv_obj_set_width(ui_PanelPPSVol, 92);
     lv_obj_set_height(ui_PanelPPSVol, 35);
-    lv_obj_set_x(ui_PanelPPSVol, -30);
+    lv_obj_set_x(ui_PanelPPSVol, -34);
     lv_obj_set_y(ui_PanelPPSVol, 10);
     lv_obj_set_align(ui_PanelPPSVol, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(ui_PanelPPSVol, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_PanelPPSVol, lv_color_hex(0xE36666), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_PanelPPSVol, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_hor(ui_PanelPPSVol, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPPSVol = lv_label_create(ui_PanelPPSVol);
     lv_obj_set_width(ui_LabelPPSVol, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPPSVol, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPPSVol, -12);
+    lv_obj_set_x(ui_LabelPPSVol, 0);
     lv_obj_set_y(ui_LabelPPSVol, 0);
-    lv_obj_set_align(ui_LabelPPSVol, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPPSVol, "5.42");
+    lv_obj_set_align(ui_LabelPPSVol, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_LabelPPSVol, "0.000");
     lv_obj_set_style_text_font(ui_LabelPPSVol, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPPSVolUnit = lv_label_create(ui_PanelPPSVol);
     lv_obj_set_width(ui_LabelPPSVolUnit, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPPSVolUnit, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPPSVolUnit, 5);
-    lv_obj_set_y(ui_LabelPPSVolUnit, 0);
+    lv_obj_set_x(ui_LabelPPSVolUnit, 0);
+    lv_obj_set_y(ui_LabelPPSVolUnit, 1);
     lv_obj_set_align(ui_LabelPPSVolUnit, LV_ALIGN_RIGHT_MID);
     lv_label_set_text(ui_LabelPPSVolUnit, "V");
-    lv_obj_set_style_text_font(ui_LabelPPSVolUnit, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_LabelPPSVolUnit, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_PanelPPSCur = lv_obj_create(ui_PPSPage);
-    lv_obj_set_width(ui_PanelPPSCur, 80);
+    lv_obj_set_width(ui_PanelPPSCur, 92);
     lv_obj_set_height(ui_PanelPPSCur, 35);
-    lv_obj_set_x(ui_PanelPPSCur, 60);
+    lv_obj_set_x(ui_PanelPPSCur, 64);
     lv_obj_set_y(ui_PanelPPSCur, 10);
     lv_obj_set_align(ui_PanelPPSCur, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(ui_PanelPPSCur, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_bg_color(ui_PanelPPSCur, lv_color_hex(0x42AA49), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_PanelPPSCur, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_hor(ui_PanelPPSCur, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPPSCur = lv_label_create(ui_PanelPPSCur);
     lv_obj_set_width(ui_LabelPPSCur, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPPSCur, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPPSCur, -12);
+    lv_obj_set_x(ui_LabelPPSCur, 0);
     lv_obj_set_y(ui_LabelPPSCur, 0);
-    lv_obj_set_align(ui_LabelPPSCur, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPPSCur, "2.25");
+    lv_obj_set_align(ui_LabelPPSCur, LV_ALIGN_LEFT_MID);
+    lv_label_set_text(ui_LabelPPSCur, "0.000");
     lv_obj_set_style_text_font(ui_LabelPPSCur, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_LabelPPSCurUnit = lv_label_create(ui_PanelPPSCur);
     lv_obj_set_width(ui_LabelPPSCurUnit, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_LabelPPSCurUnit, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_LabelPPSCurUnit, 5);
-    lv_obj_set_y(ui_LabelPPSCurUnit, 0);
+    lv_obj_set_x(ui_LabelPPSCurUnit, 0);
+    lv_obj_set_y(ui_LabelPPSCurUnit, 1);
     lv_obj_set_align(ui_LabelPPSCurUnit, LV_ALIGN_RIGHT_MID);
-    lv_label_set_text(ui_LabelPPSCurUnit, "A");
-    lv_obj_set_style_text_font(ui_LabelPPSCurUnit, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_LabelPPSCurUnit, "uA");
+    lv_obj_set_style_text_font(ui_LabelPPSCurUnit, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_Spinner1 = lv_spinner_create(ui_PPSPage);
     //lv_spinner_set_anim_params(ui_Spinner1, 1000, 90);
     lv_obj_set_width(ui_Spinner1, 25);
     lv_obj_set_height(ui_Spinner1, 25);
-    lv_obj_set_x(ui_Spinner1, -90);
+    lv_obj_set_x(ui_Spinner1, -98);
     lv_obj_set_y(ui_Spinner1, 15);
     lv_obj_set_align(ui_Spinner1, LV_ALIGN_TOP_MID);
     lv_obj_remove_flag(ui_Spinner1, LV_OBJ_FLAG_CLICKABLE);      /// Flags
@@ -345,7 +370,7 @@ void ui_PPSPage_screen_init(void)
         lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
         lv_obj_set_style_border_color(btn, lv_color_hex(0xF40F0F), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_border_opa(btn, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_border_width(btn, i == PPS_PRESET_DEFAULT ? 3 : 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
         label = lv_label_create(btn);
         lv_obj_set_width(label, LV_SIZE_CONTENT);   /// 1
@@ -518,8 +543,6 @@ void ui_PPSPage_screen_init(void)
     else
         lv_obj_set_style_text_font(ui_LabelClose, &ui_font_zhongyuan20, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_pps_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
-
     // store panels in array
     // btns[0 .. PPS_PRESET_NUM-1] are set where the preset list is built
     btns[BTN_SWITCH_1] = ui_BtnSwitch;
@@ -530,8 +553,16 @@ void ui_PPSPage_screen_init(void)
     btns[BTN_CUR_INC] = ui_BtnCurInc;
     btns[BTN_SWITCH_2] = ui_BtnSwitch;
     btns[BTN_CLOSE_2] = ui_BtnClose;
-    //
-    _para_init();
+
+    // 同一次诱骗内从主界面/设置界面切回时恢复设定值与光标，新一次诱骗才重置
+    if (pps_session != ui_pd_get_session()) {
+        pps_session = ui_pd_get_session();
+        _para_init();
+    }
+    _restore_view();
+
+    _flush_timer_cb(NULL);
+    ui_pps_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
 }
 
 void ui_PPSPage_screen_destroy(void)

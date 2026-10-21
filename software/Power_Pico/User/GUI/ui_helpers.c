@@ -8,11 +8,15 @@
 #include "user_PDUFPTask.h" // comunicate with PD UFP Task
 
 #include "./ui_helpers.h"
+#include <math.h>
 
 ///////////////////// ui variables ////////////////////
 
 float ui_current_voltage = 0.0f; // 当前电压，单位 V
 float ui_current_current = 0.0f; // 当前电流，单位 uA
+
+static ui_pd_mode_t ui_pd_mode = UI_PD_MODE_OFF; // 当前 PD 诱骗所处的模式
+static uint8_t ui_pd_session = 0;                // PD 诱骗的开启次数
 
 ///////////////////// ui help functions ////////////////////
 
@@ -21,6 +25,55 @@ void ui_full_screen_refresh(lv_obj_t * screen) {
     lv_obj_invalidate(screen);
     // 或者立即刷新整个屏幕
     lv_refr_now(NULL);
+}
+
+///////////////////// value formatting ////////////////////
+
+// 4 位有效数字，主界面与 PD 界面共用，保证各页面显示的位数一致
+void ui_fmt_sig4(char *buf, size_t size, float v)
+{
+    if (!isfinite(v)) { snprintf(buf, size, "--"); return; }
+    if (fabsf(v) < 1e-9f) v = 0.0f; // 处理接近零的值
+    float av = fabsf(v);
+    int int_digits = (av >= 1.0f) ? ((int)floorf(log10f(av)) + 1) : 0;
+    if(int_digits >= 4) {
+        snprintf(buf, size, "%.0f", roundf(v));
+        return;
+    }
+    int decimals = (int_digits == 0) ? 3 : (4 - int_digits); // 确保总数字为 4
+    snprintf(buf, size, "%.*f", decimals, v);
+}
+
+// 电流 (原始单位: uA)，按 A/mA/uA 选择单位，4 位有效数字
+void ui_fmt_current(char *buf, size_t size, float current_uA, const char **unit)
+{
+    float abs_uA = fabsf(current_uA);
+    if (abs_uA >= 1e6f) {
+        ui_fmt_sig4(buf, size, current_uA / 1e6f);
+        *unit = "A";
+    } else if (abs_uA >= 1e3f) {
+        ui_fmt_sig4(buf, size, current_uA / 1e3f);
+        *unit = "mA";
+    } else {
+        ui_fmt_sig4(buf, size, current_uA);
+        *unit = "uA";
+    }
+}
+
+// 功率 (单位: W)，按 W/mW/uW 选择单位，4 位有效数字
+void ui_fmt_power(char *buf, size_t size, float power_W, const char **unit)
+{
+    float abs_W = fabsf(power_W);
+    if (abs_W >= 1.0f) {
+        ui_fmt_sig4(buf, size, power_W);
+        *unit = "W";
+    } else if (abs_W >= 1e-3f) {
+        ui_fmt_sig4(buf, size, power_W * 1e3f);
+        *unit = "mW";
+    } else {
+        ui_fmt_sig4(buf, size, power_W * 1e6f);
+        *unit = "uW";
+    }
 }
 
 //////////// interface for system hw settings ///////////
@@ -128,6 +181,9 @@ void ui_send_pdsink_start_msg(void) {
     PD_command_msg_t pd_ui_msg;
     pd_ui_msg.event = PD_CMD_START;
     osMessageQueuePut(PD_cmd_MessageQueue, &pd_ui_msg, 0, 1);
+    // 新的一次诱骗：PD 页面据此重置自己记住的设定值和光标
+    ui_pd_mode = UI_PD_MODE_OFF;
+    ui_pd_session++;
 }
 
 // pd sink 停止信号
@@ -135,6 +191,7 @@ void ui_send_pdsink_stop_msg(void) {
     PD_command_msg_t pd_ui_msg;
     pd_ui_msg.event = PD_CMD_STOP;
     osMessageQueuePut(PD_cmd_MessageQueue, &pd_ui_msg, 0, 1);
+    ui_pd_mode = UI_PD_MODE_OFF;
 }
 
 // pps 步进调节电压值
@@ -160,12 +217,32 @@ int8_t MsgQueueGet_PD_ready(void) {
     PD_handle_event_t pd_handle_event;
     if(osMessageQueueGet(PD_handle_event_MsgQueue, &pd_handle_event, NULL, 0)==osOK) {
         if(pd_handle_event == PD_EVT_PPS_READY) {
+            ui_pd_mode = UI_PD_MODE_PPS;
             return 1;
         } else if(pd_handle_event == PD_EVT_FIXED_READY) {
+            ui_pd_mode = UI_PD_MODE_FIXED;
             return 2;
         } else if(pd_handle_event == PD_EVT_PPS_FAILED) {
+            ui_pd_mode = UI_PD_MODE_OFF;
             return -1;
         }
     }
     return 0;
+}
+
+ui_pd_mode_t ui_pd_get_mode(void) {
+    return ui_pd_mode;
+}
+
+// 当前诱骗模式对应的页面名 (见 ui.c 的 pages[])，未诱骗时为 NULL
+const char * ui_pd_get_page_name(void) {
+    switch (ui_pd_mode) {
+        case UI_PD_MODE_PPS:   return "PPS Page";
+        case UI_PD_MODE_FIXED: return "PDFixed Page";
+        default:               return NULL;
+    }
+}
+
+uint8_t ui_pd_get_session(void) {
+    return ui_pd_session;
 }
