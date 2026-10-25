@@ -85,7 +85,7 @@ void lv_port_disp_init(void)
      * Two buffers for partial rendering
      * In flush_cb DMA or similar hardware should be used to update the display in the background.*/
     LV_ATTRIBUTE_MEM_ALIGN
-    /* Two 40-row buffers keep the original 38400-byte pixel budget. */
+    /* Two 40-row buffers, 38400 bytes in all (the old single buffer was 57600). */
     static uint8_t buf_2_1[MY_DISP_HOR_RES * MY_DISP_VER_RES / 6 * BYTE_PER_PIXEL];
 
     LV_ATTRIBUTE_MEM_ALIGN

@@ -52,11 +52,12 @@
 /* Entry Point */
 ENTRY(Reset_Handler)
 
-/* Highest address of the user mode stack (match Keil official firmware layout) */
+/* Highest address of the user mode stack, fixed below the end of RAM by PR #6
+   (the Keil-built v1.1.7 image uses 0x2001D8A0) */
 _estack = 0x2001D820;
 /* Generate a link error if heap and stack don't fit into RAM */
 _Min_Heap_Size = 0x200;      /* required amount of heap  */
-_Min_Stack_Size = 0x2800; /* reserve main stack headroom like MDK */
+_Min_Stack_Size = 0x2800; /* reserve 10 KiB below the stack top (MDK's startup file reserves 0x400) */
 
 /* Specify the memory areas */
 MEMORY
