@@ -51,6 +51,7 @@ extern volatile uint32_t CmdRxOverflowCount;
 extern void TaskTickHook(void);
 extern void MX_USB_DEVICE_Init(void);
 void User_Tasks_Init(void);
+void TaskTickHook(void);
 
 #ifdef __cplusplus
 }
