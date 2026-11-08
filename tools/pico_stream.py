@@ -37,6 +37,10 @@ CRC. The tests on the AA 55 fields also drop most packets cut short by a lost
 USB transfer, whose tail would otherwise be read from the next packet's first
 bytes; the debug frames have no such check. Stream wraps parse for data that
 arrives in pieces.
+
+parse(buf, rows=True) adds the samples to each "adc" item as a fourth
+element, [(range, vol_adc, cur_adc, ref_adc), ...], for the tools that
+convert the current: pico_cal.py applies the unit's calibration to them.
 """
 
 import struct
@@ -47,12 +51,13 @@ ADC_SIZE = 81
 ADC_SAMPLES = 10
 _TIMESTAMP = struct.Struct("<Q")
 _VOL_ADC = struct.Struct("<" + "H5x" * (ADC_SAMPLES - 1) + "H")  # from the first vol_adc
+_SAMPLE = struct.Struct("<BHHH")
 DBG_MIN, DBG_MAX = 5, 58
 CMD_OVERHEAD, CMD_MAX_PAYLOAD = 10, 48
 CMD_VERSION = 1
 
 
-def parse(buf):
+def parse(buf, rows=False):
     i = 0
     n = len(buf)
     while i < n - 1:
@@ -62,8 +67,11 @@ def parse(buf):
                 break
             count = buf[i + 10]
             if 1 <= count <= ADC_SAMPLES and _plausible(buf, i + 11, i + 11 + 7 * count):
-                yield ("adc", _TIMESTAMP.unpack_from(buf, i + 2)[0],
-                       [raw * V_PER_LSB for raw in _VOL_ADC.unpack_from(buf, i + 12)[:count]])
+                item = ("adc", _TIMESTAMP.unpack_from(buf, i + 2)[0],
+                        [raw * V_PER_LSB for raw in _VOL_ADC.unpack_from(buf, i + 12)[:count]])
+                if rows:
+                    item += ([_SAMPLE.unpack_from(buf, i + 11 + 7 * k) for k in range(count)],)
+                yield item
                 i += ADC_SIZE
                 continue
         elif b0 == 0xAA and b1 == 0x5D:

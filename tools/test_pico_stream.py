@@ -85,6 +85,16 @@ class AdcPackets(unittest.TestCase):
                                      + struct.pack("<BHHH", 1, 4095, 0, 0) + bytes(63))
         self.assertAlmostEqual(volts, 33.0)
 
+    def test_rows_carry_the_samples(self):
+        data = adc_packet(1000, [3.3, 3.4], rng=2)
+        [(kind, ts, volts)] = items_of(data)
+        [(_, _, same, rows)] = list(st.parse(data, rows=True))
+        self.assertEqual(same, volts)
+        self.assertEqual(rows, [(2, int(round(3.3 / LSB)), 2048, 2050),
+                                (2, int(round(3.4 / LSB)), 2048, 2050)])
+        frame = st.command_frame(0x91, 3, b"\x00\x01")
+        self.assertEqual(list(st.parse(frame, rows=True)), [("cmd", 0x91, 3, b"\x00\x01")])
+
     def test_header_bytes_inside_a_packet_do_not_split_it(self):
         ts = 0x5DAA55AA  # the timestamp holds AA 55 and AA 5D
         self.assertEqual([i[:2] for i in items_of(adc_packet(ts, [1.0] * 10) * 2)],

@@ -11,6 +11,7 @@ talks to the port through the Win32 API. Each script's docstring says how to use
 | `pico_vlog.py` | Logs the USB stream to a file and prints input VBUS once a second |
 | `pico_dlog.py` | The same, and prints the debug build's PD events as they arrive |
 | `pico_vtrace.py` | Analyses a logged stream: gaps, VBUS under 1 V and over 4.75 V, plateaus, and an SVG plot |
+| `pico_cal.py` | Reads the unit's current calibration (CAL_GET), measures with it, changes it (CAL_SET, only with `--yes`), and applies it to a logged stream: each sample's current, and the mean and charge over a window. Only the unit's screen uses the calibration; the client and the stream do not |
 | `pico_serial.py` | The USB serial port, through pyserial or the Win32 API (a module, not a command) |
 | `pico_stream.py` | Parses the USB stream: measurement packets, command frames and the debug build's frames (a module) |
 
