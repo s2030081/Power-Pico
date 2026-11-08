@@ -55,11 +55,14 @@ const osThreadAttr_t MessageReceiveTask_attributes = {
 };
 
 // message send task
+// Above the PD and receive tasks (High1): it must read each ADC half-buffer
+// within the 1 ms before the DMA refills it, and it runs briefly. Below them,
+// the PD task's FUSB302 poll (about 2 ms of I2C every 20 ms) cost packets.
 osThreadId_t MessageSendTaskHandle;
 const osThreadAttr_t MessageSendTask_attributes = {
   .name = "MsgSendTask",
   .stack_size = 128 * 8,
-  .priority = (osPriority_t) osPriorityHigh,
+  .priority = (osPriority_t) osPriorityHigh2,
 };
 
 // Key task

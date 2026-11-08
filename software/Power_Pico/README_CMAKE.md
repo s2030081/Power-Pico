@@ -64,6 +64,7 @@ pico_boot.py 让运行中的固件重启进 Bootloader，不需要按键；pico_
 - v1.2.0 的电源调节菜单和固定电压页只编进 Modern：Classic 用不到，且其字体会让 Classic 超出 APP 区约 8.7 KiB。
 - 调试帧受 POWER_PICO_DEBUG_TRACE 控制（见上文 Trace 预设）。
 - MessageSendTask：命令回复（或调试帧）与等待中的测量包合并为一次 USB 传输，回复在前；USB 忙时最多缓存 4 个测量包。之前回复占用的那一轮会丢掉一个测量包。
+- MessageSendTask 的优先级由 osPriorityHigh 提到 osPriorityHigh2，高于 PD 和接收任务（v1.2.0 把两者提到 High1）。v1.2.0 的 PD 任务每 20 ms 经 I2C 读一次 FUSB302，约 1.9 ms；发送任务优先级低于它时，ADC 半缓冲有时在被读出前就被 DMA 覆盖。实机上 6 s 丢了 90 个测量包（6003 个中），时间戳每 20 包出现一次约 1.9 ms 的间隔。改后 10 s 收到 10003/10003 个，间隔 994-1006 us。
 - test/firmware 的两个校准测试改用 v1.2.0 的 *_scale_ua_per_lsb 字段，补了桩文件，并加 run_tests.sh。
 - Classic 设置页：PD 协商失败的红框显示 2 秒，期间离开设置页，红框随页面删除，计时器之后再删一次会崩溃（main 上原有）。现在离开页面时删除该计时器。
 
@@ -71,13 +72,15 @@ firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上�
 
 工具链同上。结果：
 
-- Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 675ffdef0702e1f83959a42591b1d3e2e77cf9692ef20805d99eebe33cb640ed，CRC32 0xF2AF35B8。
-- Classic：Flash 408856 字节，RAM 118080 字节；SHA256 d2b40c58c5e874e91b5fad5af183b71ff83902bed4583f69e35306592f87c418，CRC32 0x75BD6160（含下面设置页失败框的修复；合并提交 2a39f80 时为 408760 字节）。
-- Trace：Flash 446244 字节；SHA256 c2ad2ca9dbef80b9afd9617f04bac727332669ca88890e872f8d987421a14bce，CRC32 0x6AE7F7BB。
+- Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 9329e4f94f6ce4545538d7fb365ab04b5ad740ab0c87315fdda4303390513aa4，CRC32 0xA05A6F78（Bootloader 的算法为 0x3EA1B77E）。
+- Classic：Flash 408856 字节，RAM 118080 字节；SHA256 232e040e2e207c6e84f256fad59bf3d1552a1e92c48d9cb1d057f81ea400597f，CRC32 0xDA08F102（合并提交 2a39f80 时为 408760 字节）。
+- Trace：Flash 446244 字节；SHA256 7bf7cc8fc53e49d6a566f9ba23a222f7a7704f991b57b362f08b07abd3b7ced0，CRC32 0x3812AD7B。
+- 以上三个为含发送任务优先级修复的构建。
 - 三个预设 0 error。新增的警告只有两边原有的（fusb302_dev.c 未用变量、ui_SetPage.c 标签后声明等）。
 - test/firmware/run_tests.sh 在 WSL Ubuntu 24.04 的 gcc 13.3 下（-Wall -Wextra -Werror）两项测试均通过。
 - 校准：0x40 记录格式和有效性判据与 1.1.7 相同，启动时不改写；实机现有值（中档偏移 -67.7 uA，高档增益 0.9527、偏移 -18113 uA）经 v1.2.0 的 float32 往返后读回不变。
-- 未上板：以上固件都没有烧录到实机。Keil 工程未更新，pps-debug-trace 合并后 stm32f4xx_it.c 的 GCC 内联汇编和 user_DebugTrace.c 都不在 Keil 工程里，Keil 构建预计失败。
+- 上板（2026-11-09）：上述 Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机，Bootloader 报告 445284 字节、CRC32 0x3EA1B77E，与文件一致；--run 后 3 秒收到 3005 个测量包，10 s 收到 10003/10003 个。烧录前、首次烧录（未修复优先级的 289ab0d 镜像）后和修复后各读一次 CAL_GET，三次回答逐字节相同。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
+- Keil 工程未更新，pps-debug-trace 合并后 stm32f4xx_it.c 的 GCC 内联汇编和 user_DebugTrace.c 都不在 Keil 工程里，Keil 构建预计失败。
 
 ## 上线前回归
 
@@ -90,4 +93,4 @@ firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上�
 - 长时间采集和任务栈高水位检查。
 - v1.2.0 合并后（Modern）：PPS 降到 3.3 V 并保持（VBUS 检测关闭后不误报断开）；3.3/3.7/4.2 V 预设按钮；从 3.3 V 回到 5 V 和 9 V；PPS 低于 5 V 时拔插充电器；uA 级电流读数。
 - v1.2.0 合并后（Classic）：设置页开启 PD、9 档预设、离开页面 PD 保持。
-- 烧录前后各运行一次 py tools/pico_cal.py read --save，确认校准值不变；PC 客户端 0.1.3 能连续采集。
+- PC 客户端 0.1.3 能连续采集（烧录前后的 pico_cal.py read 比较已做，见上）。
