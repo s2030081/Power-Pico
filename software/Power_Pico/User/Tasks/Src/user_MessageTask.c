@@ -4,6 +4,7 @@
 #include "user_CmdStrategy.h"
 #include "user_MessageTask.h"
 #include "user_TasksInit.h"
+#include "user_DebugTrace.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -48,6 +49,8 @@ void MessageSendTask(void *argument)
         uint32_t wait_time = (!tx_active && (command_pending || adc_pending))
             ? 1U
             : osWaitForever;
+
+        dbg_stream_beat();
 
         flags = osThreadFlagsWait(FLAG_ADC_HALF_READY
                                       | FLAG_ADC_FULL_READY

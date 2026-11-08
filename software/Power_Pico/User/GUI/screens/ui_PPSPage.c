@@ -165,8 +165,11 @@ static void _switch_btn(bool inc)
 }
 
 #include "key.h"
+#include "user_DebugTrace.h"
 void ui_pps_page_key_handler(void* key_event)
 {
+    dbg_log(DBG_EV_KEY, (uint8_t)((key_event_t*)key_event)->id,
+            (uint16_t)((key_event_t*)key_event)->type, (uint32_t)current_btn_index);
     if(((key_event_t*)key_event)->id == KEY_ID_B && ((key_event_t*)key_event)->type == KEY_EVT_CLICK)
     {
         // 切页键：回主界面看功率，PPS 诱骗保持开启 (面板切换用屏幕上的切换按钮)

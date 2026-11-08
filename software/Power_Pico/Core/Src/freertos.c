@@ -61,6 +61,7 @@ const osThreadAttr_t defaultTask_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+#include "user_DebugTrace.h"
 
 /* USER CODE END FunctionPrototypes */
 
@@ -81,6 +82,7 @@ void vApplicationTickHook( void )
    added here, but the tick hook is called from an interrupt context, so
    code must not attempt to block, and only the interrupt safe FreeRTOS API
    functions can be used (those that end in FromISR()). */
+  dbg_tick();
   TaskTickHook();
 }
 
@@ -89,9 +91,9 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
   g_overflow_task_handle = xTask;
   g_overflow_task_name = pcTaskName;
 
-  /* Open the CC switch and reset (main.c); with a debugger attached it stops
-     at a breakpoint first, to inspect pcTaskName and the call stack. */
-  pico_trap_reset();
+  /* Debug build: record the task, open the CC switch and reset
+     (user_DebugTrace.c). */
+  dbg_stack_overflow(xTask, pcTaskName);
 }
 /* USER CODE END 3 */
 
