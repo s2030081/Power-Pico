@@ -360,6 +360,10 @@ void fixed_voltage_control_events(fixed_voltage_control_t *p, FUSB302_event_t ev
             ((uint32_t)p->phy->reg_control[10] << 16));
         if ((p->phy->cc1 != 0) == (p->phy->cc2 != 0)) return;
         p->status.cc = p->phy->cc1 ? 1 : 2;
+        /* The 5 s for capabilities count from the attach: after a detach the
+         * engine restarts and waits, and a replug late in that wait timed out
+         * before the charger's Source_Capabilities arrived. */
+        p->started_at = now;
         p->retry_at = now;
         state(p, fixed_voltage_control_CAPS, now);
     }
