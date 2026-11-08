@@ -65,13 +65,14 @@ pico_boot.py 让运行中的固件重启进 Bootloader，不需要按键；pico_
 - 调试帧受 POWER_PICO_DEBUG_TRACE 控制（见上文 Trace 预设）。
 - MessageSendTask：命令回复（或调试帧）与等待中的测量包合并为一次 USB 传输，回复在前；USB 忙时最多缓存 4 个测量包。之前回复占用的那一轮会丢掉一个测量包。
 - test/firmware 的两个校准测试改用 v1.2.0 的 *_scale_ua_per_lsb 字段，补了桩文件，并加 run_tests.sh。
+- Classic 设置页：PD 协商失败的红框显示 2 秒，期间离开设置页，红框随页面删除，计时器之后再删一次会崩溃（main 上原有）。现在离开页面时删除该计时器。
 
 firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上改动。
 
 工具链同上。结果：
 
 - Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 675ffdef0702e1f83959a42591b1d3e2e77cf9692ef20805d99eebe33cb640ed，CRC32 0xF2AF35B8。
-- Classic：Flash 408760 字节，RAM 118072 字节；SHA256 58f9a6569c2293afd933f8d874fd319941935633ff7b1dad5eb2ba926aef3a65，CRC32 0x9F74A604。
+- Classic：Flash 408856 字节，RAM 118080 字节；SHA256 d2b40c58c5e874e91b5fad5af183b71ff83902bed4583f69e35306592f87c418，CRC32 0x75BD6160（含下面设置页失败框的修复；合并提交 2a39f80 时为 408760 字节）。
 - Trace：Flash 446244 字节；SHA256 c2ad2ca9dbef80b9afd9617f04bac727332669ca88890e872f8d987421a14bce，CRC32 0x6AE7F7BB。
 - 三个预设 0 error。新增的警告只有两边原有的（fusb302_dev.c 未用变量、ui_SetPage.c 标签后声明等）。
 - test/firmware/run_tests.sh 在 WSL Ubuntu 24.04 的 gcc 13.3 下（-Wall -Wextra -Werror）两项测试均通过。
