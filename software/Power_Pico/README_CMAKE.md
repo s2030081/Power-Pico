@@ -66,20 +66,21 @@ pico_boot.py 让运行中的固件重启进 Bootloader，不需要按键；pico_
 - MessageSendTask：命令回复（或调试帧）与等待中的测量包合并为一次 USB 传输，回复在前；USB 忙时最多缓存 4 个测量包。之前回复占用的那一轮会丢掉一个测量包。
 - MessageSendTask 的优先级由 osPriorityHigh 提到 osPriorityHigh2，高于 PD 和接收任务（v1.2.0 把两者提到 High1）。v1.2.0 的 PD 任务每 20 ms 经 I2C 读一次 FUSB302，约 1.9 ms；发送任务优先级低于它时，ADC 半缓冲有时在被读出前就被 DMA 覆盖。实机上 6 s 丢了 90 个测量包（6003 个中），时间戳每 20 包出现一次约 1.9 ms 的间隔。改后 10 s 收到 10003/10003 个，间隔 994-1006 us。
 - test/firmware 的两个校准测试改用 v1.2.0 的 *_scale_ua_per_lsb 字段，补了桩文件，并加 run_tests.sh。
+- 新 PD 引擎先处理 GoodCRC，再检查 Specification Revision。实机所用充电器的 GoodCRC 该字段为 0，原代码因此丢弃 GoodCRC，MessageID 不前进；该充电器在 PS_RDY 后约 20 ms 会再发一次 Source_Capabilities，引擎回复的 Request 仍为 id0，被当作重发丢弃，充电器随即硬复位，VBUS 断电约 0.8 s，如此循环（固定电压页状态在“读取能力”和“正在协商”之间跳动）。改后第二个 Request 为 id1，合约保持在 5 V。
 - Classic 设置页：PD 协商失败的红框显示 2 秒，期间离开设置页，红框随页面删除，计时器之后再删一次会崩溃（main 上原有）。现在离开页面时删除该计时器。
 
 firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上改动。
 
 工具链同上。结果：
 
-- Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 9329e4f94f6ce4545538d7fb365ab04b5ad740ab0c87315fdda4303390513aa4，CRC32 0xA05A6F78（Bootloader 的算法为 0x3EA1B77E）。
-- Classic：Flash 408856 字节，RAM 118080 字节；SHA256 232e040e2e207c6e84f256fad59bf3d1552a1e92c48d9cb1d057f81ea400597f，CRC32 0xDA08F102（合并提交 2a39f80 时为 408760 字节）。
-- Trace：Flash 446244 字节；SHA256 7bf7cc8fc53e49d6a566f9ba23a222f7a7704f991b57b362f08b07abd3b7ced0，CRC32 0x3812AD7B。
-- 以上三个为含发送任务优先级修复的构建。
+- Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 416aac732e19b812c80687b016394588bc11dbf6a7089422b21e66be97e2cacf，CRC32 0x71C2A408（Bootloader 的算法为 0xD2782D01）。
+- Classic：Flash 408888 字节，RAM 118080 字节；SHA256 85d339898fe63e5b138651784245bb022539082d7d7e9b0c4ebf37ce8ed0f93c，CRC32 0xD2D006DD（合并提交 2a39f80 时为 408760 字节）。
+- Trace：Flash 446244 字节；SHA256 c0033cb6827fecbf9ec17b7088a8a43e8a1d17cb8dfedc357c32fc8195ebb0f4，CRC32 0x82127CE9。
+- 以上三个为含发送任务优先级和 GoodCRC 修复的构建。
 - 三个预设 0 error。新增的警告只有两边原有的（fusb302_dev.c 未用变量、ui_SetPage.c 标签后声明等）。
 - test/firmware/run_tests.sh 在 WSL Ubuntu 24.04 的 gcc 13.3 下（-Wall -Wextra -Werror）两项测试均通过。
 - 校准：0x40 记录格式和有效性判据与 1.1.7 相同，启动时不改写；实机现有值（中档偏移 -67.7 uA，高档增益 0.9527、偏移 -18113 uA）经 v1.2.0 的 float32 往返后读回不变。
-- 上板（2026-11-09）：上述 Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机，Bootloader 报告 445284 字节、CRC32 0x3EA1B77E，与文件一致；--run 后 3 秒收到 3005 个测量包，10 s 收到 10003/10003 个。烧录前、首次烧录（未修复优先级的 289ab0d 镜像）后和修复后各读一次 CAL_GET，三次回答逐字节相同。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
+- 上板（2026-11-09）：Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机三次（289ab0d、优先级修复、GoodCRC 修复），每次 Bootloader 报告的大小和 CRC32 与文件一致；当前为上述 GoodCRC 修复后的 bin（Bootloader CRC32 0xD2782D01）。优先级修复后 10 s 收到 10003/10003 个测量包。烧录前、首次烧录后和优先级修复后各读一次 CAL_GET，三次回答逐字节相同。GoodCRC 修复后用 pdiag 诊断转储确认 5 V 合约在充电器重发 Source_Capabilities 后保持，VBUS 8 s 内保持 5.0-5.2 V，固定电压页电压确认通过。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
 - Keil 工程未更新，pps-debug-trace 合并后 stm32f4xx_it.c 的 GCC 内联汇编和 user_DebugTrace.c 都不在 Keil 工程里，Keil 构建预计失败。
 
 ## 上线前回归

@@ -202,8 +202,13 @@ void fixed_voltage_control_receive(fixed_voltage_control_t *p, uint16_t header, 
     unsigned type = header & 31U;
     unsigned count = (header >> 12) & 7U;
     unsigned revision = (header >> 6) & 3U;
-    if ((header & 0x8000U) || revision == 0 || revision == 3) return;
+    if (header & 0x8000U) return;
     PD_protocol_event_t ignored = 0;
+    /* GoodCRC before the revision check: some sources send it with the
+     * Specification Revision field at 0. Dropping it left the MessageID where
+     * it was, so the next Request repeated it; the source discarded that as a
+     * retry and hard-reset when no Request came (seen 2026-11-09 on a charger
+     * that re-sends Source_Capabilities right after PS_RDY). */
     if (count == 0 && type == 1) {
         /* A delayed/repeated GoodCRC must not advance a new session's TX ID. */
         if (p->awaiting_crc &&
@@ -213,6 +218,7 @@ void fixed_voltage_control_receive(fixed_voltage_control_t *p, uint16_t header, 
         }
         return;
     }
+    if (revision == 0 || revision == 3) return;
     if (!fixed_voltage_control_active(p) || p->status.state == fixed_voltage_control_ATTACH) return;
     /* Do not treat Soft_Reset's Accept as acceptance of a 9V request, or
      * accept stale capabilities before the reset handshake completes. */
