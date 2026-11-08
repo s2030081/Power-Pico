@@ -2,11 +2,21 @@
 #include <string.h>
 #include "pico_diag.h"
 
+static void vbus_sense(fixed_voltage_control_t *p, bool on);
+
 static void state(fixed_voltage_control_t *p, fixed_voltage_control_state_t value, uint32_t now)
 {
     p->status.state = value;
     p->state_at = now;
     pico_diag_log(DIAG_STATE, value);
+    /* An unanswered request or PPS renewal, or a PHY failure, may mean the
+     * charger is gone: sense VBUS again so that an unplug below 5 V shows as a
+     * detach and a replug, either way round, attaches afresh. If the charger is
+     * in fact still there at a low PPS voltage, the detach restarts at 5 V once
+     * its PPS times out for want of renewals. REJECTED and WAIT keep the old
+     * contract, so they leave the sensing as it is. */
+    if (value == fixed_voltage_control_TIMEOUT || value == fixed_voltage_control_IO_ERROR)
+        vbus_sense(p, true);
     if (value > fixed_voltage_control_READY) {
         p->status.last_error = value;
         /* Cached values only: status reads would acknowledge PHY interrupts. */
@@ -21,7 +31,8 @@ static void state(fixed_voltage_control_t *p, fixed_voltage_control_state_t valu
 /* The FUSB302 reports a detach when VBUS falls below about 4 V. VBUS sensing is
  * therefore off while a PPS request or contract is under 5 V, as the old PD
  * library did in PPS mode, and back on once a contract at 5 V or more is in
- * place. While it is off, unplugging the charger is not detected. */
+ * place, or when a request or renewal goes unanswered (see state()). While it
+ * is off, an unplug is noticed only when the next 5 s PPS renewal fails. */
 static void vbus_sense(fixed_voltage_control_t *p, bool on)
 {
     if (p->phy) FUSB302_set_vbus_sense(p->phy, on ? 1U : 0U);
