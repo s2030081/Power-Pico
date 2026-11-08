@@ -73,14 +73,14 @@ firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上�
 
 工具链同上。结果：
 
-- Modern：Flash 445480 / 458752 字节；SHA256 b8fd29243ae7bfa630936e1b1a911ed61b7cbf7656b170707e62699be306407f，CRC32 0x7BAE084F（Bootloader 的算法为 0x5C4DF8C1）。
+- Modern：Flash 445480 / 458752 字节，RAM 119416 / 131072 字节；SHA256 9f5fc7b2f3bad521340820d84e675688fd2e2b5c31b293a770332d316f09f184。
 - Classic：Flash 408888 字节，RAM 118080 字节；SHA256 85d339898fe63e5b138651784245bb022539082d7d7e9b0c4ebf37ce8ed0f93c，CRC32 0xD2D006DD（合并提交 2a39f80 时为 408760 字节）。
 - Trace：Flash 446440 字节；SHA256 c4d0414de858b11ea69736417bf2c31c8670a93c8b50de84496a127ee9db1f8c，CRC32 0x695F9758。
 - 以上三个为含发送任务优先级、GoodCRC 修复和按钮排序的构建（Classic 不含固定电压页，排序不影响它）。
 - 三个预设 0 error。新增的警告只有两边原有的（fusb302_dev.c 未用变量、ui_SetPage.c 标签后声明等）。
 - test/firmware/run_tests.sh 在 WSL Ubuntu 24.04 的 gcc 13.3 下（-Wall -Wextra -Werror）两项测试均通过。
 - 校准：0x40 记录格式和有效性判据与 1.1.7 相同，启动时不改写；实机现有值（中档偏移 -67.7 uA，高档增益 0.9527、偏移 -18113 uA）经 v1.2.0 的 float32 往返后读回不变。
-- 上板（2026-11-09）：Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机三次（289ab0d、优先级修复、GoodCRC 修复），每次 Bootloader 报告的大小和 CRC32 与文件一致；之后又写入按钮排序后的 bin（Bootloader CRC32 0x5C4DF8C1），即上述 Modern，为实机当前固件。优先级修复后 10 s 收到 10003/10003 个测量包。烧录前、首次烧录后和优先级修复后各读一次 CAL_GET，三次回答逐字节相同。GoodCRC 修复后用 pdiag 诊断转储确认 5 V 合约在充电器重发 Source_Capabilities 后保持，VBUS 8 s 内保持 5.0-5.2 V，固定电压页电压确认通过。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
+- 上板（2026-11-09）：Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机三次（289ab0d、优先级修复、GoodCRC 修复），每次 Bootloader 报告的大小和 CRC32 与文件一致；之后又写入按钮排序后的 bin，以及诊断环形缓冲由 32 条加到 64 条的 bin（即上述 Modern，为实机当前固件）。64 条可容下一次完整的开机协商，包括两次 Source_Capabilities；pdiag 转储的大小由 508 字节变为 892 字节。优先级修复后 10 s 收到 10003/10003 个测量包。烧录前、首次烧录后和优先级修复后各读一次 CAL_GET，三次回答逐字节相同。GoodCRC 修复后用 pdiag 诊断转储确认 5 V 合约在充电器重发 Source_Capabilities 后保持，VBUS 8 s 内保持 5.0-5.2 V，固定电压页电压确认通过。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
 - Keil 工程未更新，pps-debug-trace 合并后 stm32f4xx_it.c 的 GCC 内联汇编和 user_DebugTrace.c 都不在 Keil 工程里，Keil 构建预计失败。
 
 ## 上线前回归

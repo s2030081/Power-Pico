@@ -8,7 +8,8 @@
 
 #define RECORD_MAGIC 0x31444350U
 #define PACKET_MAGIC 0x31445050U
-#define RING_SIZE 32U
+/* 64 holds a whole start-up negotiation, both Source_Capabilities included. */
+#define RING_SIZE 64U
 #define EEPROM_ADDR (0x50U << 1)
 #define SLOT0 0x80U
 #define SLOT1 0xA0U
