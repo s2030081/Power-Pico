@@ -21,14 +21,21 @@ static lv_obj_t *buttons[12], *values[2];
 static lv_timer_t *refresh_timer;
 static unsigned selected, count;
 static bool pps_mode;
-static uint16_t fixed_mv[7], voltage_mv, current_ma;
-static unsigned fixed_count;
+static uint16_t voltage_mv, current_ma;
 /* Battery voltages offered next to the fixed PDOs, as PPS at 1 A, when the
  * charger's PPS range covers them (a 3.3-5.9 V APDO covers all three). */
 static const uint16_t pps_presets_mv[] = {3300, 3700, 4200};
 #define PPS_PRESET_MA 1000U
-static uint16_t preset_mv[sizeof(pps_presets_mv) / sizeof(pps_presets_mv[0])];
-static unsigned preset_count;
+#define PPS_PRESET_COUNT (sizeof(pps_presets_mv) / sizeof(pps_presets_mv[0]))
+/* The fixed page's voltage buttons in ascending order: the charger's fixed
+ * PDOs (pps false) and the presets it covers (pps true). */
+static uint16_t entry_mv[7 + PPS_PRESET_COUNT];
+static bool entry_pps[7 + PPS_PRESET_COUNT];
+static unsigned entry_count;
+/* The voltage button the cursor was last on, kept while the unit is powered
+ * so the page reopens there; 5 V fixed until one is chosen. */
+static uint16_t last_mv = 5000;
+static bool last_pps;
 static uint32_t capabilities[7];
 static fixed_voltage_control_status_t snapshot;
 static pd_voltage_check_t voltage_check;
@@ -147,10 +154,8 @@ static void focus(void)
 {
     for (unsigned i = 0; i < count; ++i) {
         control_indicator_t indicator = INDICATOR_IDLE;
-        if (!pps_mode && i < fixed_count)
-            indicator = target_indicator(fixed_mv[i], false);
-        else if (!pps_mode && i < fixed_count + preset_count)
-            indicator = target_indicator(preset_mv[i - fixed_count], true);
+        if (!pps_mode && i < entry_count)
+            indicator = target_indicator(entry_mv[i], entry_pps[i]);
         if (!pps_mode && i == count - 2) indicator = INDICATOR_IDLE;
 #if POWER_PICO_UI_MODERN
         if (i >= count - 2) {
@@ -200,31 +205,45 @@ static void focus(void)
 static void rebuild_fixed(void)
 {
     for (unsigned i = 0; i < count; ++i) lv_obj_delete(buttons[i]);
-    count = fixed_count = preset_count = 0;
+    count = entry_count = 0;
     PD_protocol_t p = {0};
     p.power_data_obj_count = snapshot.count;
     memcpy(p.power_data_obj, snapshot.pdo, sizeof(p.power_data_obj));
-    for (unsigned i = 0; i < p.power_data_obj_count; ++i) {
+    for (unsigned i = 0; i < p.power_data_obj_count && entry_count < 7; ++i) {
         PD_power_info_t info;
         if (!PD_protocol_get_power_info(&p, i, &info) ||
             info.type != PD_PDO_TYPE_FIXED_SUPPLY || !info.max_i ||
             info.max_v < PD_V(5.0) || info.max_v > PD_V(20.0)) continue;
         uint16_t mv = info.max_v * 50U;
         bool duplicate = false;
-        for (unsigned n = 0; n < fixed_count; ++n)
-            if (fixed_mv[n] == mv) duplicate = true;
+        for (unsigned n = 0; n < entry_count; ++n)
+            if (entry_mv[n] == mv) duplicate = true;
         if (duplicate) continue;
-        fixed_mv[fixed_count++] = mv;
+        entry_mv[entry_count] = mv;
+        entry_pps[entry_count++] = false;
     }
-    for (unsigned i = 0; i < sizeof(pps_presets_mv) / sizeof(pps_presets_mv[0]); ++i)
-        if (pps_allowed(pps_presets_mv[i], PPS_PRESET_MA))
-            preset_mv[preset_count++] = pps_presets_mv[i];
+    for (unsigned i = 0; i < PPS_PRESET_COUNT; ++i)
+        if (pps_allowed(pps_presets_mv[i], PPS_PRESET_MA)) {
+            entry_mv[entry_count] = pps_presets_mv[i];
+            entry_pps[entry_count++] = true;
+        }
+    /* Ascending by voltage (insertion sort; at most 10 entries). */
+    for (unsigned i = 1; i < entry_count; ++i) {
+        uint16_t mv = entry_mv[i];
+        bool pps = entry_pps[i];
+        unsigned n = i;
+        for (; n > 0 && entry_mv[n - 1] > mv; --n) {
+            entry_mv[n] = entry_mv[n - 1];
+            entry_pps[n] = entry_pps[n - 1];
+        }
+        entry_mv[n] = mv;
+        entry_pps[n] = pps;
+    }
     /* Two rows fit above the status line: four columns, or five for a ninth button. */
-    unsigned total = fixed_count + preset_count;
-    unsigned columns = total > 8 ? 5U : 4U;
+    unsigned columns = entry_count > 8 ? 5U : 4U;
     int pitch = columns == 5U ? 44 : 55, width = pitch - 4;
-    for (unsigned i = 0; i < total; ++i) {
-        uint16_t mv = i < fixed_count ? fixed_mv[i] : preset_mv[i - fixed_count];
+    for (unsigned i = 0; i < entry_count; ++i) {
+        uint16_t mv = entry_mv[i];
         char buf[16];
         snprintf(buf, sizeof(buf), "%gV", mv / 1000.0);
         buttons[count] = button(buf, 12 + (int)(i % columns) * pitch,
@@ -237,11 +256,27 @@ static void rebuild_fixed(void)
         ++count;
     }
     bool retained = false;
-    for (unsigned i = 0; i < fixed_count; ++i)
-        if (fixed_mv[i] == voltage_mv) retained = true;
-    if (!retained) voltage_mv = fixed_count ? fixed_mv[0] : 5000;
+    unsigned first_fixed = entry_count;
+    for (unsigned i = 0; i < entry_count; ++i) {
+        if (entry_pps[i]) continue;
+        if (first_fixed == entry_count) first_fixed = i;
+        if (entry_mv[i] == voltage_mv) retained = true;
+    }
+    if (!retained) voltage_mv = first_fixed < entry_count ? entry_mv[first_fixed] : 5000;
     action_buttons();
+    /* Reopen on the last voltage button, else 5 V fixed, else the first. */
     selected = 0;
+    bool found = false;
+    for (unsigned i = 0; i < entry_count && !found; ++i)
+        if (entry_mv[i] == last_mv && entry_pps[i] == last_pps) {
+            selected = i;
+            found = true;
+        }
+    for (unsigned i = 0; i < entry_count && !found; ++i)
+        if (entry_mv[i] == 5000 && !entry_pps[i]) {
+            selected = i;
+            found = true;
+        }
     focus();
 }
 
@@ -366,22 +401,21 @@ void ui_power_control_key(void *event)
     }
     if (key->id == KEY_ID_L || key->id == KEY_ID_R) {
         selected = (selected + (key->id == KEY_ID_R ? 1 : count - 1)) % count;
+        if (!pps_mode && selected < entry_count) {
+            last_mv = entry_mv[selected];
+            last_pps = entry_pps[selected];
+        }
         focus();
     } else if (key->id == KEY_ID_Y) {
         if (selected == count - 1) {
             lv_lib_pm_goto("Power Page", 0);
             return;
         }
-        if (!pps_mode && selected < fixed_count) {
-            if (user_pd_power_request(fixed_mv[selected], current_ma, false)) {
-                voltage_mv = fixed_mv[selected];
-                voltage_check = (pd_voltage_check_t){0};
-            } else {
-                lv_label_set_text(state_label, text("Busy / unavailable", "忙或设置不支持"));
-                return;
-            }
-        } else if (!pps_mode && selected < fixed_count + preset_count) {
-            if (user_pd_power_request(preset_mv[selected - fixed_count], PPS_PRESET_MA, true)) {
+        if (!pps_mode && selected < entry_count) {
+            bool pps = entry_pps[selected];
+            uint16_t mv = entry_mv[selected];
+            if (user_pd_power_request(mv, pps ? PPS_PRESET_MA : current_ma, pps)) {
+                if (!pps) voltage_mv = mv;
                 voltage_check = (pd_voltage_check_t){0};
             } else {
                 lv_label_set_text(state_label, text("Busy / unavailable", "忙或设置不支持"));
@@ -405,6 +439,10 @@ void ui_power_control_key(void *event)
             if (user_pd_power_request(restore ? 5000 : voltage_mv,
                     current_ma, pps_mode && !restore)) {
                 voltage_check = (pd_voltage_check_t){0};
+                if (restore) {
+                    last_mv = 5000;
+                    last_pps = false;
+                }
             } else {
                 lv_label_set_text(state_label, text("Busy / unavailable", "忙或设置不支持"));
                 return;
@@ -418,7 +456,7 @@ lv_obj_t *ui_power_control_init(bool pps)
 {
     pps_mode = pps;
     pps_pending = pps_submit_failed = false;
-    count = fixed_count = selected = 0;
+    count = entry_count = selected = 0;
     capability_count = 0;
     last_check = PD_VOLTAGE_IDLE;
     memset(capabilities, 0, sizeof(capabilities));

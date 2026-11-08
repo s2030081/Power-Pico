@@ -60,7 +60,7 @@ pico_boot.py 让运行中的固件重启进 Bootloader，不需要按键；pico_
 在本 fork 的 main（含 pico_cal.py 和 pps-debug-trace）上合并 EudaiG 的 v1.2.0。Modern 界面采用 v1.2.0，Classic 界面保留本 fork 的流程。另加：
 
 - 新 PD 引擎（BSP/PD/fixed_voltage_control.c）的 PPS 下限由 5 V 降到 3.3 V，固定 PDO 仍从 5 V 起；user_pd_power_request 和电压确认（pd_voltage_check.h）同步。VBUS 低于约 4 V 时 FUSB302 会报断开，所以请求 5 V 以下的 PPS 前关闭 VBUS 检测，合约回到 5 V 及以上时再打开（旧 PD 库在 PPS 模式下也这样做）。关闭期间拔掉充电器检测不到。
-- Modern 固定电压页在充电器的固定电压之后加 3.3、3.7、4.2 V 三个 PPS 1 A 按钮，只在充电器的 PPS 范围覆盖时出现；超过 8 个按钮时改为每行 5 个。两个电源页的电流读数改用与主页相同的 uA/mA/A 格式。
+- Modern 固定电压页加 3.3、3.7、4.2 V 三个 PPS 1 A 按钮，只在充电器的 PPS 范围覆盖时出现，与充电器的固定电压一起按电压升序排列；超过 8 个按钮时改为每行 5 个。光标首次落在 5 V，之后回到上次所在的电压按钮（只存于 RAM，断电后回到 5 V；按“恢复5V”也回到 5 V）。两个电源页的电流读数改用与主页相同的 uA/mA/A 格式。
 - v1.2.0 的电源调节菜单和固定电压页只编进 Modern：Classic 用不到，且其字体会让 Classic 超出 APP 区约 8.7 KiB。
 - 调试帧受 POWER_PICO_DEBUG_TRACE 控制（见上文 Trace 预设）。
 - MessageSendTask：命令回复（或调试帧）与等待中的测量包合并为一次 USB 传输，回复在前；USB 忙时最多缓存 4 个测量包。之前回复占用的那一轮会丢掉一个测量包。
@@ -73,14 +73,14 @@ firmware/PowerPico_Firmware_v1.2.0.bin 是 PR #6 自己的镜像，不含以上�
 
 工具链同上。结果：
 
-- Modern：Flash 445284 / 458752 字节，RAM 118256 / 131072 字节；SHA256 416aac732e19b812c80687b016394588bc11dbf6a7089422b21e66be97e2cacf，CRC32 0x71C2A408（Bootloader 的算法为 0xD2782D01）。
+- Modern：Flash 445480 / 458752 字节；SHA256 b8fd29243ae7bfa630936e1b1a911ed61b7cbf7656b170707e62699be306407f，CRC32 0x7BAE084F（Bootloader 的算法为 0x5C4DF8C1）。
 - Classic：Flash 408888 字节，RAM 118080 字节；SHA256 85d339898fe63e5b138651784245bb022539082d7d7e9b0c4ebf37ce8ed0f93c，CRC32 0xD2D006DD（合并提交 2a39f80 时为 408760 字节）。
-- Trace：Flash 446244 字节；SHA256 c0033cb6827fecbf9ec17b7088a8a43e8a1d17cb8dfedc357c32fc8195ebb0f4，CRC32 0x82127CE9。
-- 以上三个为含发送任务优先级和 GoodCRC 修复的构建。
+- Trace：Flash 446440 字节；SHA256 c4d0414de858b11ea69736417bf2c31c8670a93c8b50de84496a127ee9db1f8c，CRC32 0x695F9758。
+- 以上三个为含发送任务优先级、GoodCRC 修复和按钮排序的构建（Classic 不含固定电压页，排序不影响它）。
 - 三个预设 0 error。新增的警告只有两边原有的（fusb302_dev.c 未用变量、ui_SetPage.c 标签后声明等）。
 - test/firmware/run_tests.sh 在 WSL Ubuntu 24.04 的 gcc 13.3 下（-Wall -Wextra -Werror）两项测试均通过。
 - 校准：0x40 记录格式和有效性判据与 1.1.7 相同，启动时不改写；实机现有值（中档偏移 -67.7 uA，高档增益 0.9527、偏移 -18113 uA）经 v1.2.0 的 float32 往返后读回不变。
-- 上板（2026-11-09）：Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机三次（289ab0d、优先级修复、GoodCRC 修复），每次 Bootloader 报告的大小和 CRC32 与文件一致；当前为上述 GoodCRC 修复后的 bin（Bootloader CRC32 0xD2782D01）。优先级修复后 10 s 收到 10003/10003 个测量包。烧录前、首次烧录后和优先级修复后各读一次 CAL_GET，三次回答逐字节相同。GoodCRC 修复后用 pdiag 诊断转储确认 5 V 合约在充电器重发 Source_Capabilities 后保持，VBUS 8 s 内保持 5.0-5.2 V，固定电压页电压确认通过。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
+- 上板（2026-11-09）：Modern bin 经 pico_boot.py 和 pico_flash.py 写入实机三次（289ab0d、优先级修复、GoodCRC 修复），每次 Bootloader 报告的大小和 CRC32 与文件一致；之后又写入按钮排序后的 bin（Bootloader CRC32 0x5C4DF8C1），即上述 Modern，为实机当前固件。优先级修复后 10 s 收到 10003/10003 个测量包。烧录前、首次烧录后和优先级修复后各读一次 CAL_GET，三次回答逐字节相同。GoodCRC 修复后用 pdiag 诊断转储确认 5 V 合约在充电器重发 Source_Capabilities 后保持，VBUS 8 s 内保持 5.0-5.2 V，固定电压页电压确认通过。Classic 和 Trace 未上板；其他回归项（PPS、预设、界面）未测。
 - Keil 工程未更新，pps-debug-trace 合并后 stm32f4xx_it.c 的 GCC 内联汇编和 user_DebugTrace.c 都不在 Keil 工程里，Keil 构建预计失败。
 
 ## 上线前回归
