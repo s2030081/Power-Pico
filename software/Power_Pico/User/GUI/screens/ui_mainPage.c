@@ -5,6 +5,10 @@
 
 #include "../ui.h"
 #include "ui_mainPage.h"
+#include <string.h>
+#if POWER_PICO_UI_MODERN
+#include "../modern/ui_modern.h"
+#endif
 
 lv_obj_t * ui_HomeScreen = NULL;
 static lv_obj_t * ui_ButVal = NULL;
@@ -54,6 +58,13 @@ void ui_main_page_key_handler(void* key_event)
     // }
 }
 
+static void set_label_if_changed(lv_obj_t *label, const char *text)
+{
+    if (strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
 static void set_val_cur_label(float voltage, float current)
 {
     char buf[16];
@@ -61,23 +72,32 @@ static void set_val_cur_label(float voltage, float current)
 
     // voltage (单位: V) -> 4 位有效数字
     ui_fmt_sig4(buf, sizeof(buf), voltage);
-    lv_label_set_text(ui_LabelValt, buf);
+    set_label_if_changed(ui_LabelValt, buf);
 
     // current (原始单位: uA)，按 A/mA/uA 选择单位
     ui_fmt_current(buf, sizeof(buf), current, &unit);
-    lv_label_set_text(ui_LabelCur, buf);
-    lv_label_set_text(ui_LabelUnitCur, unit);
+    set_label_if_changed(ui_LabelCur, buf);
+    set_label_if_changed(ui_LabelUnitCur, unit);
 
     // power = V * A，按 W/mW/uW 选择单位，4 位有效数字
     ui_fmt_power(buf, sizeof(buf), voltage * (current / 1e6f), &unit);
-    lv_label_set_text(ui_LabelEnerge, buf);
-    lv_label_set_text(ui_LabelUnitEnerge, unit);
+    set_label_if_changed(ui_LabelEnerge, buf);
+    set_label_if_changed(ui_LabelUnitEnerge, unit);
 
     // time
     uint8_t hours = 0, minutes = 0, seconds = 0;
     ui_GetElapsedTime_HMS(&hours, &minutes, &seconds);
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hours, minutes, seconds);
-    lv_label_set_text(ui_LabelTime, buf);
+    set_label_if_changed(ui_LabelTime, buf);
+#if POWER_PICO_UI_MODERN
+    m_fit_home_number(ui_LabelValt);
+    m_fit_home_number(ui_LabelCur);
+    m_fit_home_number(ui_LabelEnerge);
+    m_center_digits(ui_LabelUnitVal, 26);
+    m_center_digits(ui_LabelUnitCur, 26);
+    m_center_digits(ui_LabelUnitEnerge, 26);
+    m_center_digits(ui_LabelTime, 230);
+#endif
 }
 
 // event funtions
@@ -94,6 +114,9 @@ static void _flush_timer_cb(lv_timer_t * timer)
 
 void ui_main_screen_init(void)
 {
+#if POWER_PICO_UI_MODERN
+#include "../modern/main_layout.inc"
+#else
     ui_HomeScreen = lv_obj_create(NULL);
     lv_obj_remove_flag(ui_HomeScreen, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -203,6 +226,7 @@ void ui_main_screen_init(void)
     lv_obj_set_align(ui_LabelTime, LV_ALIGN_TOP_MID);
     lv_label_set_text(ui_LabelTime, "00:00:00");
     lv_obj_set_style_text_font(ui_LabelTime, &ui_font_HeiTi48, LV_PART_MAIN | LV_STATE_DEFAULT);
+#endif
     _flush_timer_cb(NULL);
     // flush timer
     _flush_timer = lv_timer_create(_flush_timer_cb, 250,  NULL);

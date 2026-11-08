@@ -2,18 +2,26 @@
 #define __USER_DEBUGTRACE_H__
 
 /*
- * Debug build only: a crash record and a PD event log.
+ * A crash record and a PD event log, in every build.
  *
  * The record lives at a fixed RAM address above the application's stack top
  * (0x2001D820) and above the bootloader's RAM (below 0x20003B18), which the
  * startup code does not clear, so it survives the reset that every trap below
  * ends in. Each trap opens the CC switch first, so the charger drops VBUS.
  *
- * Every event is also sent live over the USB stream as a frame
- * AA 5D <len> <type> <seq> <payload>, next to the 81-byte AA 55 ADC packets.
+ * With POWER_PICO_DEBUG_TRACE (a CMake option, on in the Trace preset) every
+ * event, a summary and any crash record are also sent over the USB stream as
+ * frames AA 5D <len> <type> <seq> <payload>, next to the 81-byte AA 55 ADC
+ * packets; tools/pico_dlog.py reads them. Without it nothing is sent, so the
+ * stream carries only the packets the PC client parses. The record, the event
+ * ring, the tick watchdog and the traps run either way.
  */
 
 #include <stdint.h>
+
+#ifndef POWER_PICO_DEBUG_TRACE
+#define POWER_PICO_DEBUG_TRACE 0
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,0 +1,2 @@
+# run_tests.sh runs under Linux or WSL: keep it LF on a Windows checkout too
+*.sh text eol=lf

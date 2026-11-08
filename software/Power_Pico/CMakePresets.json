@@ -18,6 +18,13 @@
             }
         },
         {
+            "name": "Trace",
+            "inherits": "Modern",
+            "cacheVariables": {
+                "POWER_PICO_DEBUG_TRACE": "ON"
+            }
+        },
+        {
             "name": "default",
             "hidden": true,
             "generator": "Ninja",
@@ -63,6 +70,10 @@
         {
             "name": "Classic",
             "configurePreset": "Classic"
+        },
+        {
+            "name": "Trace",
+            "configurePreset": "Trace"
         },
         {
             "name": "Debug",

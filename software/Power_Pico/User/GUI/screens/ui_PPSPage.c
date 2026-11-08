@@ -4,6 +4,13 @@
 // Project name: PowerPico
 
 #include "../ui.h"
+#if POWER_PICO_UI_MODERN
+#include "ui_FixedVoltagePage.h"
+lv_obj_t *ui_PPSPage;
+void ui_PPSPage_screen_init(void) { ui_PPSPage = ui_power_control_init(true); }
+void ui_PPSPage_screen_destroy(void) { ui_power_control_destroy(); }
+void ui_pps_page_key_handler(void *event) { ui_power_control_key(event); }
+#else
 
 lv_obj_t * ui_PPSPage = NULL;
 static lv_obj_t * ui_PanelPPSVol = NULL;
@@ -83,10 +90,10 @@ static void _flush_timer_cb(lv_timer_t * timer) {
 ///////////////// key function ///////////////////
 
 static void _set_label_val_cur(void) {
-    char buf[8];
-    sprintf(buf, "%.2f V", cur_voltage);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.2f V", cur_voltage);
     lv_label_set_text(ui_LabelValSet, buf);
-    sprintf(buf, "%.2f A", cur_current);
+    snprintf(buf, sizeof(buf), "%.2f A", cur_current);
     lv_label_set_text(ui_LabelCurSet, buf);
 }
 
@@ -570,5 +577,9 @@ void ui_PPSPage_screen_init(void)
 
 void ui_PPSPage_screen_destroy(void)
 {
-    if(ui_pps_timer) lv_timer_delete(ui_pps_timer);
+    if(ui_pps_timer) {
+        lv_timer_delete(ui_pps_timer);
+        ui_pps_timer = NULL;
+    }
 }
+#endif

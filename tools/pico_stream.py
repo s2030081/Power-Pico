@@ -16,8 +16,8 @@ A5 5A, a command frame (User/user_CmdStrategy.c), from the PC or as the
   a CRC-16/CCITT (start 0xFFFF) over version through payload. An answer's
   payload starts with a status byte.
 
-AA 5D, a debug frame, sent only by the debug build (branch pps-debug-trace,
-  User/user_DebugTrace.c): the header, the frame's whole length u8 (5-58), the
+AA 5D, a debug frame, sent only by the debug build (the Trace preset, which sets
+  POWER_PICO_DEBUG_TRACE; User/user_DebugTrace.c): the header, the frame's whole length u8 (5-58), the
   frame type, a sequence byte, then the payload. Type 1 carries up to four
   12-byte events: TIM5 time in microseconds u32, kind u8, a u8, b u16, c u32.
   Types 2-6 are the boot summary and the record of the previous crash.
@@ -164,7 +164,7 @@ def describe_command(ftype, sequence, payload):
     return "CMD %s #%d %s" % (name, sequence, payload.hex())
 
 
-# --- debug frames (the pps-debug-trace build) ----------------------------------
+# --- debug frames (the Trace preset's build) -----------------------------------
 
 CTRL = {1: "GoodCRC", 2: "GotoMin", 3: "Accept", 4: "Reject", 5: "Ping", 6: "PS_RDY",
         7: "Get_Src_Cap", 8: "Get_Sink_Cap", 9: "DR_Swap", 10: "PR_Swap", 11: "VCONN_Swap",

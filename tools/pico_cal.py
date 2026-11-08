@@ -16,7 +16,13 @@ PowerPico's USB IDs). Each reads the port for 1.5 s first and sends nothing to a
 that does not carry the firmware's measurement packets. set and restore print what
 they would send and send it only with --yes. Both refuse what the firmware's own
 check (ADC_Calibration_IsValid: each gain 0.75-1.25, each offset 32 LSB or less)
-would refuse.
+would refuse, in either firmware: 1.1.7 counts the 32 LSB on the calibrated scale
+(SCALE x gain) and 1.2.0 on the nominal one (SCALE), so this takes the smaller.
+
+set and restore then check the CAL_SET echo and a fresh CAL_GET against what they
+sent. Firmware 1.2.0 keeps each gain as gain x SCALE in float32 and divides it back
+for the answer, so a gain can come back one float32 step (about 1e-7) from what was
+sent; they accept that and say so. Anything more, and any offset that differs, fails.
 
 The firmware (User/user_AdcDataStrategy.c) converts a sample as
 
@@ -83,17 +89,27 @@ def f32(x):
 
 
 def problems(cal):
-    """What the firmware's ADC_Calibration_IsValid would refuse in `cal`; empty when
-    it would take it."""
+    """What either firmware's ADC_Calibration_IsValid would refuse in `cal`; empty when
+    both would take it. The offset limit is 32 LSB of SCALE x gain in 1.1.7 and of
+    SCALE in 1.2.0, so it is 32 LSB of SCALE x min(gain, 1) here."""
     found = []
     for r, name in RANGES.items():
         gain, offset = cal[name + "_gain"], cal[name + "_offset_ua"]
         if not math.isfinite(gain) or not 0.75 <= gain <= 1.25:
             found.append("%s gain %r is outside 0.75-1.25" % (name, gain))
-        elif not math.isfinite(offset) or abs(offset / (SCALE[r] * gain)) > 32.0:
-            found.append("%s offset %r uA is over 32 LSB (%.6g uA)"
-                         % (name, offset, 32.0 * SCALE[r] * gain))
+            continue
+        limit = 32.0 * SCALE[r] * min(gain, 1.0)
+        if not math.isfinite(offset) or abs(offset) > limit:
+            found.append("%s offset %r uA is over 32 LSB (%.6g uA)" % (name, offset, limit))
     return found
+
+
+def f32_steps(a, b):
+    """How many float32 values apart a and b are."""
+    def ordered(x):
+        i = struct.unpack("<i", struct.pack("<f", x))[0]
+        return i if i >= 0 else -(i & 0x7FFFFFFF)
+    return abs(ordered(a) - ordered(b))
 
 
 def decode_cal(payload):
@@ -341,11 +357,19 @@ def write_cal(unit, new):
         raise CalError("CAL_SET: %s" % status_text(answer))
     echoed = decode_cal(answer[1:25])
     back, _ = get_cal(unit)
+    stepped = []
     for k in FIELDS:
-        if f32(new[k]) != echoed[k] or echoed[k] != back[k]:
+        # 1.2.0 keeps gain x SCALE in float32: a gain may come back one step off
+        allowed = 1 if k.endswith("_gain") else 0
+        if f32_steps(f32(new[k]), echoed[k]) > allowed or echoed[k] != back[k]:
             raise CalError("Read-back differs at %s: sent %r, echoed %r, read %r"
                            % (k, new[k], echoed[k], back[k]))
+        if echoed[k] != f32(new[k]):
+            stepped.append(k)
     show_cal(back, "Calibration now on the unit (read back):")
+    for k in stepped:
+        print("  %s came back one float32 step from what was sent (%r for %r): the "
+              "firmware keeps gain x SCALE, as 1.2.0 does" % (k, back[k], f32(new[k])))
 
 
 # --- commands ------------------------------------------------------------------
@@ -364,7 +388,8 @@ def cmd_read(args):
           % (names.get(mode, "?"), mode, RANGES.get(in_use, "?"), in_use))
     print("All defaults (gain 1, offset 0): %s" % ("yes" if cal == DEFAULTS else "no"))
     found = problems(cal)
-    print("The firmware's validity check: %s" % ("passes" if not found else "; ".join(found)))
+    print("The firmware's validity check (1.1.7 and 1.2.0): %s"
+          % ("passes" if not found else "; ".join(found)))
     if args.save:
         record = {"read_at": time.strftime("%Y-%m-%d %H:%M:%S"), "port": unit.name,
                   "calibration": cal, "cal_get_answer_frame": cal_frame.hex(" "),

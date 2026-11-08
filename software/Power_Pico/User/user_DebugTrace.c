@@ -1,7 +1,7 @@
 /*
- * Debug build only: a crash record that survives a reset, a PD event log sent
- * live over the USB stream, a tick watchdog, and traps that reset instead of
- * freezing. See user_DebugTrace.h.
+ * A crash record that survives a reset, a PD event log (sent over the USB
+ * stream only with POWER_PICO_DEBUG_TRACE), a tick watchdog, and traps that
+ * reset instead of freezing. See user_DebugTrace.h.
  */
 #include "user_DebugTrace.h"
 
@@ -116,8 +116,7 @@ static void copy_str(char *dst, uint32_t size, const char *src)
 
 void dbg_boot(void)
 {
-    s_boot_csr = RCC->CSR;
-    RCC->CSR |= RCC_CSR_RMVF;
+    s_boot_csr = RCC->CSR;  /* pico_diag_early_init, called next, clears the flags */
     if (rec->magic != DBG_MAGIC || rec->magic_inv != ~DBG_MAGIC) {
         memset(rec, 0, sizeof(*rec));
         rec->magic = DBG_MAGIC;
@@ -252,6 +251,10 @@ void dbg_service(void)
 {
     uint32_t now = HAL_GetTick();
     int frames;
+
+    if (!POWER_PICO_DEBUG_TRACE) {
+        return;  /* nothing on the stream; the record and ring still fill */
+    }
 
     for (frames = 0; frames < 2; frames++) {
         uint8_t buf[1U + 4U * 12U];

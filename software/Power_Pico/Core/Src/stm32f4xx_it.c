@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "adc.h"
 #include "gate.h"
+#include "pico_diag.h"
+#include "user_DebugTrace.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,7 +50,7 @@
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+void HardFault_Record(uint32_t *frame, uint32_t exc_return);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -90,18 +92,24 @@ void NMI_Handler(void)
   */
 __attribute__((naked)) void HardFault_Handler(void)
 {
-  /* Debug build: pass the stacked frame to dbg_fault (user_DebugTrace.c),
-     which records it and resets. */
+  /* Pass the stacked frame to HardFault_Record, which logs the fault for
+     pico_diag, then has dbg_fault (user_DebugTrace.c) record it and reset. */
   __asm volatile(
     "tst lr, #4      \n"
     "ite eq          \n"
     "mrseq r0, msp   \n"
     "mrsne r0, psp   \n"
     "mov r1, lr      \n"
-    "b dbg_fault     \n");
+    "b HardFault_Record \n");
 }
 
-/* Debug build: the tick watchdog (user_DebugTrace.c), TIM3 at priority 2. */
+void HardFault_Record(uint32_t *frame, uint32_t exc_return)
+{
+  pico_diag_fault(3);
+  dbg_fault(frame, exc_return);
+}
+
+/* The tick watchdog (user_DebugTrace.c), TIM3 at priority 2. */
 __attribute__((naked)) void TIM3_IRQHandler(void)
 {
   __asm volatile(
@@ -118,6 +126,7 @@ __attribute__((naked)) void TIM3_IRQHandler(void)
   */
 void MemManage_Handler(void)
 {
+  pico_diag_fault(4);
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
 
   /* USER CODE END MemoryManagement_IRQn 0 */
@@ -129,6 +138,7 @@ void MemManage_Handler(void)
   */
 void BusFault_Handler(void)
 {
+  pico_diag_fault(5);
   /* USER CODE BEGIN BusFault_IRQn 0 */
 
   /* USER CODE END BusFault_IRQn 0 */
@@ -140,6 +150,7 @@ void BusFault_Handler(void)
   */
 void UsageFault_Handler(void)
 {
+  pico_diag_fault(6);
   /* USER CODE BEGIN UsageFault_IRQn 0 */
 
   /* USER CODE END UsageFault_IRQn 0 */

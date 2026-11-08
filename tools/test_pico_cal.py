@@ -72,12 +72,34 @@ def bench_log():
     return bytes(data)
 
 
+def f32(x):
+    return pico_cal.f32(x)
+
+
+# SCALE_LOW/MID/HIGH as firmware 1.2.0 computes them: float steps, then a double
+# multiply (User/user_AdcDataStrategy.h)
+FW_SCALE = [f32(f32(f32(3.0) / f32(4096.0)) / f32(50.0)) for _ in range(3)]
+FW_SCALE = [f32(s / f32(r)) * 1e6 for s, r in zip(FW_SCALE, (50.0, 0.5, 0.005))]
+
+
+def stored_as_1_2_0(cal):
+    """The six float32 values a 1.2.0 unit answers after CAL_SET of `cal`: each gain
+    kept as float32(gain x SCALE) and divided back, the offsets as sent."""
+    out = list(cal)
+    for i, scale in zip((0, 2, 4), FW_SCALE):
+        out[i] = f32(f32(f32(cal[i]) * scale) / scale)
+    return out
+
+
 class FakeUnit:
     """Answers commands as User/user_CmdStrategy.c does, and streams a packet of MID
-    samples every millisecond."""
+    samples every millisecond. firmware="1.2.0" stores the gains as 1.2.0 does;
+    echo_steps adds that many float32 steps to the first gain it answers with."""
 
-    def __init__(self, cal=None, streaming=True):
+    def __init__(self, cal=None, streaming=True, firmware="1.1.7", echo_steps=0):
         self.cal = as_f32(cal or pico_cal.DEFAULTS)
+        self.firmware = firmware
+        self.echo_steps = echo_steps
         self.mode, self.in_use = 0, 2
         self.streaming = streaming
         self.out = bytearray()
@@ -117,8 +139,13 @@ class FakeUnit:
                 if pico_cal.problems(dict(zip(FIELDS, new))):
                     answer = b"\x04"
                 else:
+                    if self.firmware == "1.2.0":
+                        new = stored_as_1_2_0(new)
+                    if self.echo_steps:
+                        bits = struct.unpack("<I", struct.pack("<f", new[0]))[0]
+                        new[0] = struct.unpack("<f", struct.pack("<I", bits + self.echo_steps))[0]
                     self.cal = new
-                    answer = b"\x00" + payload
+                    answer = b"\x00" + struct.pack("<6f", *new)
             else:
                 answer = b"\x02"
             self.out += pico_stream.command_frame(ftype | 0x80, seq, answer)
@@ -177,6 +204,26 @@ class Calibration(unittest.TestCase):
             [problem] = pico_cal.problems(cal)
             self.assertIn(word, problem)
         self.assertEqual(pico_cal.problems(dict(AFTER, mid_offset_ua=-31 * 29.296875)), [])
+
+    def test_the_offset_limit_is_the_smaller_of_both_firmwares(self):
+        # gain 1.2, offset 33 LSB of SCALE: 1.1.7 takes it (27.5 LSB of SCALE x gain),
+        # 1.2.0 refuses it (over 32 LSB of SCALE)
+        [problem] = pico_cal.problems(dict(AFTER, mid_gain=1.2, mid_offset_ua=33 * 29.296875))
+        self.assertIn("mid offset", problem)
+        self.assertEqual(pico_cal.problems(dict(AFTER, mid_gain=1.2,
+                                                mid_offset_ua=31.9 * 29.296875)), [])
+        # gain 0.8, offset 30 LSB of SCALE: 1.2.0 takes it, 1.1.7 refuses it (37.5 LSB)
+        [problem] = pico_cal.problems(dict(AFTER, mid_gain=0.8, mid_offset_ua=30 * 29.296875))
+        self.assertIn("mid offset", problem)
+
+    def test_float32_steps(self):
+        self.assertEqual(pico_cal.f32_steps(1.0, 1.0), 0)
+        self.assertEqual(pico_cal.f32_steps(1.0, f32(1.0 + 2 ** -23)), 1)
+        self.assertEqual(pico_cal.f32_steps(f32(-67.7), f32(-67.7)), 0)
+        self.assertEqual(pico_cal.f32_steps(0.0, -0.0), 0)
+
+    def test_the_applied_values_come_back_exactly_from_1_2_0(self):
+        self.assertEqual(stored_as_1_2_0(as_f32(AFTER)), as_f32(AFTER))
 
     def test_load_cal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -281,7 +328,7 @@ class Commands(unittest.TestCase):
         with attached(unit):
             status, text = run("read", "--port", "FAKE", "--save", self.path("cal.json"))
             self.assertEqual(status, 0, text)
-            self.assertIn("validity check: passes", text)
+            self.assertIn("validity check (1.1.7 and 1.2.0): passes", text)
             with open(self.path("cal.json"), encoding="utf-8") as fh:
                 record = json.load(fh)
             self.assertEqual([record["calibration"][k] for k in FIELDS], as_f32(AFTER))
@@ -317,6 +364,32 @@ class Commands(unittest.TestCase):
         self.assertEqual(status, 0, text)
         self.assertEqual(unit.cal, as_f32(AFTER))
         self.assertEqual(unit.commands, [0x10, 0x13, 0x10])
+
+    def test_a_gain_one_step_off_from_1_2_0_is_accepted_and_reported(self):
+        gain = next(g for g in (0.9 + n * 1e-4 for n in range(2000))
+                    if stored_as_1_2_0([g, 0, 1, 0, 1, 0])[0] != f32(g))
+        unit = FakeUnit(firmware="1.2.0")
+        with attached(unit):
+            status, text = run("set", "--port", "FAKE", "--low-gain", repr(gain), "--yes")
+        self.assertEqual(status, 0, text)
+        self.assertEqual(pico_cal.f32_steps(unit.cal[0], f32(gain)), 1)
+        self.assertIn("low_gain came back one float32 step", text)
+
+    def test_a_gain_two_steps_off_fails(self):
+        unit = FakeUnit(echo_steps=2)
+        with attached(unit):
+            status, text = run("set", "--port", "FAKE", "--low-gain", "0.95", "--yes")
+        self.assertEqual(status, 1)
+        self.assertIn("Read-back differs at low_gain", text)
+
+    def test_set_writes_and_reads_back_from_1_2_0(self):
+        unit = FakeUnit(firmware="1.2.0")
+        with attached(unit):
+            status, text = run("set", "--port", "FAKE", "--mid-offset", "-67.7", "--high-gain",
+                               "0.9527", "--high-offset", "-18113", "--yes")
+        self.assertEqual(status, 0, text)
+        self.assertEqual(unit.cal, as_f32(AFTER))
+        self.assertNotIn("float32 step", text)
 
     def test_values_the_firmware_would_refuse_are_never_sent(self):
         unit = FakeUnit()

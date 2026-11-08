@@ -6,7 +6,7 @@ Usage:
 
 pico_vlog.py (the raw bytes to OUT_PREFIX-N.bin, VBUS once a second, STALL
 when no packet arrives), with --max 3600 by default, and one line for each
-frame the debug build (branch pps-debug-trace) sends: each event, as
+frame the debug build (the Trace preset, POWER_PICO_DEBUG_TRACE) sends: each event, as
 
   14:02:11    81234567 us  TX_REQUEST Request id2 [flagged] (pos 5, 3300 mV, 1000 mA)
 

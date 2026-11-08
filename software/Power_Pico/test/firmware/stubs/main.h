@@ -1,6 +1,7 @@
 #ifndef TEST_MAIN_H
 #define TEST_MAIN_H
 
+#include <stddef.h> /* NULL, which the HAL headers bring in */
 #include <stdint.h>
 
 #define __disable_irq() ((void)0)

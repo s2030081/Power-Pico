@@ -91,7 +91,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
   g_overflow_task_handle = xTask;
   g_overflow_task_name = pcTaskName;
 
-  /* Debug build: record the task, open the CC switch and reset
+  /* Record the task, open the CC switch and reset
      (user_DebugTrace.c). */
   dbg_stack_overflow(xTask, pcTaskName);
 }

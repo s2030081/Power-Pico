@@ -34,26 +34,27 @@ osThreadId_t MessageSendTaskHandle = (void *)1;
 #define CHECK_EQ_U8(expected, actual) CHECK_TRUE((uint8_t)(expected) == (actual))
 #define CHECK_EQ_U16(expected, actual) CHECK_TRUE((uint16_t)(expected) == (actual))
 #define CHECK_NEAR(expected, actual, tolerance)                                  \
-    CHECK_TRUE(fabsf((expected) - (actual)) <= (tolerance))
+    CHECK_TRUE(fabs((double)(expected) - (double)(actual)) <= (tolerance))
+/* float32 resolution: the scales are stored as float, SCALE_* are doubles */
+#define CHECK_REL(expected, actual)     CHECK_NEAR((expected), (actual), fabs((double)(expected)) * 1e-6)
 
 void Sys_Get_AdcCalibration(ADC_Calibration_t *calibration)
 {
     *calibration = current_calibration;
 }
 
+/* As BL24C02.c: validate, write the EEPROM, and apply only after it saved. */
 bool Sys_Set_AdcCalibration(const ADC_Calibration_t *calibration)
 {
     if (!ADC_Calibration_IsValid(calibration)) {
         return false;
     }
+    eeprom_save_count++;
+    if (!eeprom_save_result) {
+        return false;
+    }
     current_calibration = *calibration;
     return true;
-}
-
-bool EEPROM_SysSetting_Save(void)
-{
-    eeprom_save_count++;
-    return eeprom_save_result;
 }
 
 void EEPROM_UpdateCommand_Write(bool is_update)
@@ -103,6 +104,16 @@ uint8_t Gate_Get_Mode(void)
 uint64_t GetMicrosecondCounter(void)
 {
     return 0U;
+}
+
+bool USER_USB_is_Configured(void)
+{
+    return false;
+}
+
+bool pico_diag_usb_service(void)
+{
+    return false;
 }
 
 osStatus_t osMessageQueuePut(osMessageQueueId_t queue,
@@ -286,7 +297,8 @@ static void test_set_all_repeated_request_and_rollback(void)
 
     CmdStrategy_ProcessRx(request, length);
     CHECK_TRUE(eeprom_save_count == 1);
-    CHECK_NEAR(1.2f, current_calibration.mid_scale_multiplier, 1e-6f);
+    /* The wire carries gain; the firmware stores gain x the nominal scale. */
+    CHECK_REL(1.2f * SCALE_MID, current_calibration.mid_scale_ua_per_lsb);
     CHECK_NEAR(-2.0f, current_calibration.mid_offset_ua, 1e-6f);
     CHECK_EQ_U8(0U, responses[0].data[8]);
 
@@ -300,9 +312,9 @@ static void test_set_all_repeated_request_and_rollback(void)
     length = make_frame(CMD_CAL_SET, 11U, payload, sizeof(payload), request);
     CmdStrategy_ProcessRx(request, length);
     CHECK_EQ_U8(5U, responses[2].data[8]);
-    CHECK_NEAR(previous.low_scale_multiplier,
-               current_calibration.low_scale_multiplier,
-               1e-6f);
+    CHECK_NEAR(previous.low_scale_ua_per_lsb,
+               current_calibration.low_scale_ua_per_lsb,
+               0.0);
 }
 
 static void test_firmware_update_frame_triggers_reset_without_response(void)

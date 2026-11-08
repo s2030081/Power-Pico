@@ -50,8 +50,10 @@ option(POWER_PICO_RESTORE_EEPROM_BASELINE "Build one-shot EEPROM rollback helper
 if(POWER_PICO_RESTORE_EEPROM_BASELINE)
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE POWER_PICO_RESTORE_EEPROM_BASELINE=1)
 endif()
+option(POWER_PICO_DEBUG_TRACE "Send the debug trace's AA 5D frames on the USB stream" OFF)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    POWER_PICO_UI_MODERN=$<BOOL:${POWER_PICO_UI_MODERN}>)
+    POWER_PICO_UI_MODERN=$<BOOL:${POWER_PICO_UI_MODERN}>
+    POWER_PICO_DEBUG_TRACE=$<BOOL:${POWER_PICO_DEBUG_TRACE}>)
 # Both UI themes format measurement values with floating-point snprintf.
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -Wl,-u,_printf_float)
 

@@ -4,6 +4,9 @@
 // Project name: PowerPico
 
 #include "../ui.h"
+#if POWER_PICO_UI_MODERN
+#include "../modern/ui_modern.h"
+#endif
 
 lv_obj_t * ui_PDFixedPage = NULL;
 static lv_obj_t * ui_PanelPDVol = NULL;
@@ -45,6 +48,10 @@ static void _flush_timer_cb(lv_timer_t * timer) {
     ui_fmt_current(buf, sizeof(buf), current, &unit);
     lv_label_set_text(ui_LabelPDCur, buf);
     lv_label_set_text(ui_LabelPDCurUnit, unit);
+#if POWER_PICO_UI_MODERN
+    m_fit_meter(ui_LabelPDVol);
+    m_fit_meter(ui_LabelPDCur);
+#endif
 }
 
 ///////////////// key functions ///////////////////
@@ -66,6 +73,9 @@ static void _switch_btn(bool inc)
     }
 
     lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+#if POWER_PICO_UI_MODERN
+    for (unsigned i = 0; i < 6; ++i) m_focus(btns[i], (int)i == current_btn_index);
+#endif
 }
 
 #include "key.h"
@@ -110,7 +120,7 @@ void ui_pdfixed_page_key_handler(void* key_event)
                 break;
             case 5:
                 ui_send_pdsink_stop_msg();
-                lv_lib_pm_goto("Set Page", 0);
+                lv_lib_pm_goto("Power Page", 0);
                 break;
         }
     }
@@ -127,6 +137,9 @@ static void _para_init(void)
 
 void ui_PDFixedPage_screen_init(void)
 {
+#if POWER_PICO_UI_MODERN
+#include "../modern/pd_fixed_layout.inc"
+#else
     ui_PDFixedPage = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_PDFixedPage, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
@@ -316,6 +329,7 @@ void ui_PDFixedPage_screen_init(void)
     lv_label_set_text(ui_LabelPDClose, _("press here to close PD"));
     lv_obj_set_style_text_font(ui_LabelPDClose, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+#endif
     btns[0] = ui_BtnPDSet1;
     btns[1] = ui_BtnPDSet2;
     btns[2] = ui_BtnPDSet3;
@@ -329,6 +343,9 @@ void ui_PDFixedPage_screen_init(void)
         _para_init();
     }
     lv_obj_set_style_border_width(btns[current_btn_index], 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+#if POWER_PICO_UI_MODERN
+    for (unsigned i = 0; i < 6; ++i) m_focus(btns[i], (int)i == current_btn_index);
+#endif
 
     _flush_timer_cb(NULL);
     ui_pd_fixed_timer = lv_timer_create(_flush_timer_cb, 500, NULL);
