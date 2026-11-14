@@ -73,8 +73,8 @@ void HardwareInitTask(void *argument)
     Gate_Set_Mode(Sys_Get_CurrentRangeMode());
     pico_diag_storage_init();
 
-    // Keep CC attached; background PD may request only the fixed 5V PDO.
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
+    // Leave the input CC open until the user enables PD.
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
 
     // FUSB302 init
     user_pd_boot_init();

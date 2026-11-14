@@ -42,6 +42,7 @@ typedef struct
 
 
 void PDUFPTask(void *argument);
+bool user_pd_legacy_active(void);
 
 
 #ifdef __cplusplus

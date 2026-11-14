@@ -2,6 +2,7 @@
 #include "ui_PowerPage.h"
 #if POWER_PICO_UI_MODERN /* Classic uses the Set page and its own PD pages */
 #include "key.h"
+#include "user_FixedVoltage.h"
 #if POWER_PICO_UI_MODERN
 #include "../modern/ui_modern.h"
 #define POWER_ACCENT ui_palette_accent()
@@ -10,10 +11,11 @@
 #endif
 
 lv_obj_t *ui_PowerPage;
-static lv_obj_t *rows[2], *captions[2], *arrows[2], *message;
+static lv_obj_t *rows[3], *captions[3], *arrows[3], *message;
 static lv_timer_t *poll_timer;
 static unsigned selected;
 static bool waiting;
+static bool last_enabled;
 
 static const char *text(const char *en, const char *zh)
 {
@@ -34,7 +36,7 @@ static lv_obj_t *label(lv_obj_t *parent, const char *value, int x, int y,
 
 static void focus(void)
 {
-    for (unsigned i = 0; i < 2; ++i) {
+    for (unsigned i = 0; i < 3; ++i) {
         uint32_t accent = POWER_ACCENT;
         lv_obj_set_style_bg_color(rows[i],
 #if POWER_PICO_UI_MODERN
@@ -62,6 +64,14 @@ static void focus(void)
 static void poll(lv_timer_t *timer)
 {
     (void)timer;
+    bool enabled = user_pd_power_is_enabled();
+    if (enabled != last_enabled) {
+        lv_label_set_text(captions[0], enabled ?
+            text("Turn off PD", "PD 电源 OFF") : text("Enable PD", "PD 电源 ON"));
+        if (!enabled && last_enabled)
+            lv_label_set_text(message, text("PD off / cable removed", "PD 关"));
+        last_enabled = enabled;
+    }
     if (!waiting) return;
     int8_t result = MsgQueueGet_PD_ready();
     if (!result) return;
@@ -84,11 +94,21 @@ void ui_power_page_key_handler(void *event)
     if (key->id == KEY_ID_B) {
         lv_lib_pm_goto("Set Page", 0);
     } else if (key->id == KEY_ID_L || key->id == KEY_ID_R) {
-        selected ^= 1U;
+        selected = (selected + (key->id == KEY_ID_R ? 1U : 2U)) % 3U;
         lv_label_set_text(message, "");
         focus();
     } else if (key->id == KEY_ID_Y) {
         if (selected == 0) {
+            bool enabled = user_pd_power_is_enabled();
+            if (user_pd_power_set_enabled(!enabled)) {
+                lv_label_set_text(message, enabled ?
+                    text("PD turned off", "PD 关") :
+                    text("Waiting for cable / PD", "PD 连接中"));
+                poll(NULL);
+            }
+        } else if (!user_pd_power_is_enabled()) {
+            lv_label_set_text(message, text("Enable PD first", "按 PD ON"));
+        } else if (selected == 1) {
             lv_lib_pm_goto("Fixed Voltage Page", 0);
         } else {
 #if POWER_PICO_UI_MODERN
@@ -108,6 +128,8 @@ void ui_power_page_key_handler(void *event)
 void ui_PowerPage_screen_init(void)
 {
     waiting = false;
+    selected = 0;
+    last_enabled = user_pd_power_is_enabled();
     ui_PowerPage = lv_obj_create(NULL);
     lv_obj_remove_style_all(ui_PowerPage);
     lv_obj_set_size(ui_PowerPage, 240, 240);
@@ -120,12 +142,12 @@ void ui_PowerPage_screen_init(void)
     label(ui_PowerPage, text("Power control", "电源调节"), 12, 14, 192,
           ui_round_font18());
     label(ui_PowerPage, LV_SYMBOL_CHARGE, 212, 14, 16, &lv_font_montserrat_16);
-    for (unsigned i = 0; i < 2; ++i) {
+    for (unsigned i = 0; i < 3; ++i) {
         rows[i] = lv_obj_create(ui_PowerPage);
         lv_obj_remove_style_all(rows[i]);
         lv_obj_remove_flag(rows[i], LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_pos(rows[i], 12, 56 + 76 * i);
-        lv_obj_set_size(rows[i], 216, 64);
+        lv_obj_set_pos(rows[i], 12, 49 + 55 * i);
+        lv_obj_set_size(rows[i], 216, 49);
         lv_obj_set_style_radius(rows[i], 6, 0);
         lv_obj_set_style_border_width(rows[i], 1, 0);
         lv_obj_set_style_border_side(rows[i], LV_BORDER_SIDE_BOTTOM, 0);
@@ -134,13 +156,15 @@ void ui_PowerPage_screen_init(void)
         lv_obj_set_style_border_side(rows[i], LV_BORDER_SIDE_FULL, 0);
 #endif
         lv_obj_set_style_bg_opa(rows[i], LV_OPA_COVER, 0);
-        captions[i] = label(rows[i], i ? text("PPS control", "PPS 调节") :
-            text("Fixed voltage", "固定电压"), 16, 23, 168,
+        captions[i] = label(rows[i], i == 0 ?
+            (last_enabled ? text("Turn off PD", "PD 电源 OFF") : text("Enable PD", "PD 电源 ON")) :
+            i == 1 ? text("Fixed voltage", "固定电压") :
+            text("PPS control", "PPS 调节"), 16, 15, 168,
             ui_round_font18());
-        arrows[i] = label(rows[i], LV_SYMBOL_RIGHT, 186, 24, 18,
+        arrows[i] = label(rows[i], LV_SYMBOL_RIGHT, 186, 15, 18,
                           &lv_font_montserrat_16);
     }
-    message = label(ui_PowerPage, "", 12, 202, 216, ui_round_font18());
+    message = label(ui_PowerPage, "", 12, 218, 216, &ui_font_modern14);
     focus();
     poll_timer = lv_timer_create(poll, 200, NULL);
 }

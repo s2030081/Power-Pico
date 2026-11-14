@@ -26,16 +26,40 @@ static uint32_t probe_polled_at;
 static uint8_t pd_timer_ticks;
 static volatile bool pd_startup_done;
 static bool sink_enabled, upgrade_pending, legacy_start_pending;
+static uint8_t power_enable_request;
 static uint32_t legacy_requested_at;
 static fixed_voltage_control_status_t power_snapshot;
 static uint16_t power_request_mv, power_request_ma;
 static bool power_request_pending, power_request_pps;
+
+bool user_pd_legacy_active(void)
+{
+    return _pd_working_status || legacy_start_pending;
+}
 
 void user_pd_power_status(fixed_voltage_control_status_t *status)
 {
     int32_t lock = osKernelLock();
     *status = power_snapshot;
     if (lock == 0) osKernelRestoreLock(lock);
+}
+
+bool user_pd_power_is_enabled(void)
+{
+    int32_t lock = osKernelLock();
+    bool enabled = sink_enabled || power_enable_request == 1;
+    if (lock == 0) osKernelRestoreLock(lock);
+    return enabled;
+}
+
+bool user_pd_power_set_enabled(bool enabled)
+{
+    int32_t lock = osKernelLock();
+    bool allowed = !enabled || (!_pd_working_status &&
+        !legacy_start_pending && !probe_owned);
+    if (allowed) power_enable_request = enabled ? 1 : 2;
+    if (lock == 0) osKernelRestoreLock(lock);
+    return allowed;
 }
 
 bool user_pd_power_request(uint16_t millivolts, uint16_t milliamps, bool pps)
@@ -67,13 +91,9 @@ void user_pd_boot_init(void)
     pico_diag_arm_ram();
     uint8_t result = fusb302_dev_init();
     pico_diag_log(DIAG_PD_BOOT, result);
-    sink_enabled = result == 0;
-    probe_phy_dirty = true;
-    if (sink_enabled) {
-        fusb302_dev.strict_attach = 1;
-        fixed_voltage_control_start_5v(&probe, &fusb302_dev, HAL_GetTick());
-        probe_polled_at = HAL_GetTick() - 20U;
-    }
+    /* Initialising the PHY must not attach the sink or request 5 V. */
+    sink_enabled = false;
+    probe_phy_dirty = result == 0;
     pd_startup_done = true;
 }
 
@@ -127,9 +147,43 @@ static void probe_release(void)
 static void probe_service(void)
 {
     int32_t lock = osKernelLock();
+    uint8_t enable_request = power_enable_request;
+    power_enable_request = 0;
     uint8_t request = probe_request;
     probe_request = 0;
     osKernelRestoreLock(lock);
+    if (enable_request == 2) {
+        if (probe_owned) probe_release();
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+        sink_enabled = false;
+        upgrade_pending = false;
+        power_request_pending = false;
+        request = 0;
+        memset(&probe, 0, sizeof(probe));
+        lock = osKernelLock();
+        memset(&power_snapshot, 0, sizeof(power_snapshot));
+        memset(&probe_snapshot, 0, sizeof(probe_snapshot));
+        osKernelRestoreLock(lock);
+        return;
+    }
+    if (enable_request == 1 && !sink_enabled) {
+        FUSB302_ret_t result = FUSB302_init(&fusb302_dev);
+        pico_diag_log(DIAG_PHY_INIT, result);
+        if (result == FUSB302_SUCCESS) {
+            fusb302_dev.strict_attach = 1;
+            fixed_voltage_control_start_5v(&probe, &fusb302_dev, HAL_GetTick());
+            probe_polled_at = HAL_GetTick() - 20U;
+            sink_enabled = true;
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
+        } else {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+            lock = osKernelLock();
+            memset(&power_snapshot, 0, sizeof(power_snapshot));
+            power_snapshot.state = fixed_voltage_control_IO_ERROR;
+            osKernelRestoreLock(lock);
+            return;
+        }
+    }
     if (request == 2) {
         if (probe_owned) probe_release();
         lock = osKernelLock();
@@ -180,10 +234,29 @@ static void probe_service(void)
         if (result != FUSB302_SUCCESS && result != FUSB302_BUSY)
             probe.status.state = fixed_voltage_control_IO_ERROR;
         else {
-            if (events & (FUSB302_EVENT_DETACHED | FUSB302_EVENT_HARD_RESET)) {
+            if (events & FUSB302_EVENT_DETACHED) {
                 if (probe_owned) {
-                    probe.status.state = events & FUSB302_EVENT_DETACHED ?
-                        fixed_voltage_control_DISCONNECTED : fixed_voltage_control_RESET;
+                    probe.status.state = fixed_voltage_control_DISCONNECTED;
+                    probe_publish();
+                    probe_release();
+                }
+                fixed_voltage_control_events(&probe, events, HAL_GetTick());
+                memset(probe.status.pdo, 0, sizeof(probe.status.pdo));
+                probe.status.count = 0;
+                probe.status.target_mv = 0;
+                probe.status.last_error = fixed_voltage_control_IDLE;
+                HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+                sink_enabled = false;
+                upgrade_pending = false;
+                power_request_pending = false;
+                lock = osKernelLock();
+                power_snapshot = probe.status;
+                osKernelRestoreLock(lock);
+                return;
+            }
+            if (events & FUSB302_EVENT_HARD_RESET) {
+                if (probe_owned) {
+                    probe.status.state = fixed_voltage_control_RESET;
                     probe_publish();
                     probe_release();
                 }
@@ -218,6 +291,13 @@ static void probe_service(void)
         }
     }
     if (sink_enabled) fixed_voltage_control_tick(&probe, HAL_GetTick());
+    if (sink_enabled && !probe_owned && !probe.status.contract_mv &&
+        !fixed_voltage_control_active(&probe)) {
+        /* An unsuccessful enable must not remain armed for a later replug. */
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+        sink_enabled = false;
+        power_request_pending = false;
+    }
     if (power_request_pending && !_pd_working_status && !probe_owned) {
         if (!probe.awaiting_crc && (probe.status.state == fixed_voltage_control_READY ||
             (probe.status.contract_mv && (probe.status.state == fixed_voltage_control_REJECTED ||
@@ -350,6 +430,8 @@ void PDUFPTask(void *argument)
         legacy_start_pending = false;
         if (!_pd_working_status) continue;
         dbg_log(DBG_EV_PD_STOP, 0, 0, 0);
+        osTimerStop(PD_UFP_Task_timer_id);
+        pd_timer_ticks = 0;
         // FUSB CC pin disconnect
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
         _pd_working_status = 0;
@@ -400,6 +482,18 @@ void PDUFPTask(void *argument)
           for (uint8_t i = 0; i < 3 && FUSB302_alert(&fusb302_dev, &FUSB302_events) != FUSB302_SUCCESS; i++) {}
           if (FUSB302_events) {
               handle_FUSB302_event(FUSB302_events);
+              if (FUSB302_events & FUSB302_EVENT_DETACHED) {
+                  /* A new cable must require a fresh user start. */
+                  osTimerStop(PD_UFP_Task_timer_id);
+                  pd_timer_ticks = 0;
+                  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET);
+                  _pd_working_status = 0;
+                  uint8_t stale_event;
+                  while (osMessageQueueGet(PD_handle_event_MsgQueue,
+                                            &stale_event, NULL, 0) == osOK) {}
+                  stale_event = PD_EVT_PPS_FAILED;
+                  osMessageQueuePut(PD_handle_event_MsgQueue, &stale_event, 0, 0);
+              }
           }
       }
     }

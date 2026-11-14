@@ -230,6 +230,7 @@ int8_t MsgQueueGet_PD_ready(void) {
 }
 
 ui_pd_mode_t ui_pd_get_mode(void) {
+    if (!user_pd_legacy_active()) ui_pd_mode = UI_PD_MODE_OFF;
     return ui_pd_mode;
 }
 

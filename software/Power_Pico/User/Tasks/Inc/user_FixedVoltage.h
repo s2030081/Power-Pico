@@ -8,5 +8,7 @@ void user_fixed_voltage_control_status(fixed_voltage_control_status_t *status);
 void user_pd_boot_init(void);
 void user_pd_power_status(fixed_voltage_control_status_t *status);
 bool user_pd_power_request(uint16_t millivolts, uint16_t milliamps, bool pps);
+bool user_pd_power_set_enabled(bool enabled);
+bool user_pd_power_is_enabled(void);
 
 #endif
